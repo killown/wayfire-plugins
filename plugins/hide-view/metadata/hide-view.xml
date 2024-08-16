@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<wayfire>
+	<plugin name="hide-view">
+		<_short>Hide/Unhide Views</_short>
+		<_long>
+			This plugin allows users to hide and unhide views (windows) on demand. 
+			When a view is hidden, it is removed from the visible workspace but remains 
+			active and can be restored to its original state.
+		</_long>
+		<category>Utility</category>
+	</plugin>
+</wayfire>
