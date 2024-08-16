@@ -1,4 +1,3 @@
-
 /*
 
 MIT License
@@ -57,21 +56,19 @@ public:
     WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
 
     auto view = wf::ipc::find_view_by_id(data["view-id"]);
-    if (view && !view->get_data<hide_view_data>()) {
+    if (view && view->role == wf::VIEW_ROLE_TOPLEVEL) {
       hide_view_data hv_data;
       view->store_data(std::make_unique<hide_view_data>(hv_data));
       wf::scene::set_node_enabled(view->get_root_node(), false);
+      view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
       wf::view_unmapped_signal unmap_signal;
       unmap_signal.view = view;
       wf::get_core().emit(&unmap_signal);
 
       return wf::ipc::json_ok();
     } else if (!view) {
-      return wf::ipc::json_error("Failed to find view with given id.");
-    } else if (view->get_data<hide_view_data>()) {
-      return wf::ipc::json_error("View already hidden. Cannot hide it!");
+      return wf::ipc::json_error("Failed to hide the view.");
     } else {
-      /* Unreachable */
       return wf::ipc::json_ok();
     }
   };
@@ -81,20 +78,17 @@ public:
     WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
 
     auto view = wf::ipc::find_view_by_id(data["view-id"]);
-    if (view && view->get_data<hide_view_data>()) {
+    if (view && view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT) {
       wf::scene::set_node_enabled(view->get_root_node(), true);
+      view->role = wf::VIEW_ROLE_TOPLEVEL;
       wf::view_mapped_signal map_signal;
       map_signal.view = view;
       wf::get_core().emit(&map_signal);
-      view->release_data<hide_view_data>();
 
       return wf::ipc::json_ok();
     } else if (!view) {
-      return wf::ipc::json_error("Failed to find view with given id.");
-    } else if (!view->get_data<hide_view_data>()) {
-      return wf::ipc::json_error("View is not hidden. Cannot unhide it!");
+      return wf::ipc::json_error("Failed to unhide the view.");
     } else {
-      /* Unreachable */
       return wf::ipc::json_ok();
     }
   };
