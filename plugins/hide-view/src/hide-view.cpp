@@ -61,6 +61,9 @@ public:
       hide_view_data hv_data;
       view->store_data(std::make_unique<hide_view_data>(hv_data));
       wf::scene::set_node_enabled(view->get_root_node(), false);
+      wf::view_unmapped_signal unmap_signal;
+      unmap_signal.view = view;
+      wf::get_core().emit(&unmap_signal);
 
       return wf::ipc::json_ok();
     } else if (!view) {
@@ -80,6 +83,9 @@ public:
     auto view = wf::ipc::find_view_by_id(data["view-id"]);
     if (view && view->get_data<hide_view_data>()) {
       wf::scene::set_node_enabled(view->get_root_node(), true);
+      wf::view_mapped_signal map_signal;
+      map_signal.view = view;
+      wf::get_core().emit(&map_signal);
       view->release_data<hide_view_data>();
 
       return wf::ipc::json_ok();
