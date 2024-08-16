@@ -63,6 +63,10 @@ public:
       view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
       wf::view_unmapped_signal unmap_signal;
       unmap_signal.view = view;
+      auto output = view->get_output();
+      if (auto toplevel = toplevel_cast(view)) {
+        output->wset()->remove_view(toplevel);
+      }
       wf::get_core().emit(&unmap_signal);
 
       return wf::ipc::json_ok();
@@ -83,6 +87,10 @@ public:
       view->role = wf::VIEW_ROLE_TOPLEVEL;
       wf::view_mapped_signal map_signal;
       map_signal.view = view;
+      auto output = view->get_output();
+      if (auto toplevel = toplevel_cast(view)) {
+        output->wset()->add_view(toplevel);
+      }
       wf::get_core().emit(&map_signal);
 
       return wf::ipc::json_ok();
