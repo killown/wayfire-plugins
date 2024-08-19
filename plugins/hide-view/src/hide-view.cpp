@@ -47,9 +47,34 @@ class wayfire_hide_view : public wf::plugin_interface_t {
 
 public:
   void init() override {
+    ipc_repo->register_method("hide-view/run-n-hide", ipc_run_and_hide);
     ipc_repo->register_method("hide-view/hide", ipc_view_hide);
     ipc_repo->register_method("hide-view/unhide", ipc_view_unhide);
   }
+
+  wf::ipc::method_callback ipc_run_and_hide =
+      [=](nlohmann::json data) -> nlohmann::json {
+    WFJSON_EXPECT_FIELD(data, "app", string);
+
+    wf::get_core().run(data["app"]);
+    wf::get_core().connect(&on_view_mapped);
+    return wf::ipc::json_ok();
+  };
+
+  wf::signal::connection_t<wf::view_mapped_signal> on_view_mapped =
+      [=](wf::view_mapped_signal *ev) {
+        auto view = ev->view;
+        if (!view) {
+          return;
+        }
+        if (!view->get_data<hide_view_data>()) {
+          hide_view_data hv_data;
+          view->store_data(std::make_unique<hide_view_data>(hv_data));
+          wf::scene::set_node_enabled(view->get_root_node(), false);
+          view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
+        }
+        on_view_mapped.disconnect();
+      };
 
   wf::ipc::method_callback ipc_view_hide =
       [=](nlohmann::json data) -> nlohmann::json {
