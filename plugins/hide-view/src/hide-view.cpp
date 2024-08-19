@@ -129,6 +129,7 @@ public:
   void fini() override {
     ipc_repo->unregister_method("hide-view/hide");
     ipc_repo->unregister_method("hide-view/unhide");
+    ipc_repo->unregister_method("hide-view/run-n-hide");
   }
 };
 } // namespace hide_view
