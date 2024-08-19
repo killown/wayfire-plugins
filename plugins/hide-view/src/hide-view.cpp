@@ -72,6 +72,13 @@ public:
           view->store_data(std::make_unique<hide_view_data>(hv_data));
           wf::scene::set_node_enabled(view->get_root_node(), false);
           view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
+          wf::view_unmapped_signal unmap_signal;
+          unmap_signal.view = view;
+          auto output = view->get_output();
+          if (auto toplevel = toplevel_cast(view)) {
+            output->wset()->remove_view(toplevel);
+          }
+          wf::get_core().emit(&unmap_signal);
         }
         on_view_mapped.disconnect();
       };
