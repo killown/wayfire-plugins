@@ -144,6 +144,10 @@ public:
           if (it != hidden_pids.end()) {
             hidden_pids.erase(it);
           }
+          auto output = view->get_output();
+          if (auto toplevel = toplevel_cast(view)) {
+            output->wset()->remove_view(toplevel);
+          }
           wf::view_unmapped_signal unmap_signal;
           unmap_signal.view = view;
           wf::get_core().emit(&unmap_signal);
