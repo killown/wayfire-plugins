@@ -87,6 +87,7 @@ public:
     ipc_repo->register_method("hide-view/unhide", ipc_view_unhide);
   }
 
+  /* soreau code for run and hide */
   wf::ipc::method_callback ipc_run_and_hide =
       [=](nlohmann::json data) -> nlohmann::json {
     WFJSON_EXPECT_FIELD(data, "app", string);
@@ -114,13 +115,7 @@ public:
         }
         bool found = false;
         pid_t view_pid;
-        wlr_xwayland_surface *xwayland_surface =
-            wlr_xwayland_surface_try_from_wlr_surface(view->get_wlr_surface());
-        if (xwayland_surface) {
-          view_pid = xwayland_surface->pid;
-        } else {
-          wl_client_get_credentials(view->get_client(), &view_pid, 0, 0);
-        }
+        wl_client_get_credentials(view->get_client(), &view_pid, 0, 0);
         do {
           for (auto p : hidden_pids) {
             if (p == view_pid) {
@@ -148,9 +143,9 @@ public:
           if (auto toplevel = toplevel_cast(view)) {
             output->wset()->remove_view(toplevel);
           }
-          wf::view_unmapped_signal unmap_signal;
-          unmap_signal.view = view;
-          wf::get_core().emit(&unmap_signal);
+
+          output = view->get_output();
+          view->set_output(nullptr);
           idle_refocus.run_once([=]() { wf::get_core().seat->refocus(); });
           if (hidden_pids.empty()) {
             on_view_mapped.disconnect();
@@ -168,13 +163,10 @@ public:
       view->store_data(std::make_unique<hide_view_data>(hv_data));
       wf::scene::set_node_enabled(view->get_root_node(), false);
       view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
-      wf::view_unmapped_signal unmap_signal;
-      unmap_signal.view = view;
       auto output = view->get_output();
       if (auto toplevel = toplevel_cast(view)) {
         output->wset()->remove_view(toplevel);
       }
-      wf::get_core().emit(&unmap_signal);
 
       return wf::ipc::json_ok();
     } else if (!view) {
@@ -192,14 +184,11 @@ public:
     if (view && view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT) {
       wf::scene::set_node_enabled(view->get_root_node(), true);
       view->role = wf::VIEW_ROLE_TOPLEVEL;
-      wf::view_mapped_signal map_signal;
-      map_signal.view = view;
-      auto output = view->get_output();
-      if (auto toplevel = toplevel_cast(view)) {
-        output->wset()->add_view(toplevel);
-      }
-      wf::get_core().emit(&map_signal);
 
+      auto new_output = wf::get_core().seat->get_active_output();
+      if (auto toplevel = toplevel_cast(view)) {
+        new_output->wset()->add_view(toplevel);
+      }
       return wf::ipc::json_ok();
     } else if (!view) {
       return wf::ipc::json_error("Failed to unhide the view.");

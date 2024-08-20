@@ -2,7 +2,11 @@ from wayfire import WayfireSocket as OriginalWayfireSocket
 from wayfire.core.template import get_msg_template
 
 class WayfireSocket(OriginalWayfireSocket):
-    
+    def run_n_hide(self, app):
+        message = get_msg_template("hide-view/run_n_hide")
+        message["data"]["app"] = app
+        return self.send_json(message) 
+
     def hide_view(self, view_id):
         message = get_msg_template("hide-view/hide")
         message["data"]["view-id"] = view_id
