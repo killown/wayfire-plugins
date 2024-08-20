@@ -45,6 +45,41 @@ class hide_view_data : public wf::custom_data_t {};
 class wayfire_hide_view : public wf::plugin_interface_t {
   wf::shared_data::ref_ptr_t<wf::ipc::method_repository_t> ipc_repo;
 
+  std::vector<wayfire_view> hidden_views;
+  std::vector<pid_t> hidden_pids;
+  wf::wl_idle_call idle_refocus;
+
+  /* Borrowed from sway */
+  pid_t get_parent_pid(pid_t child) {
+    pid_t parent = -1;
+    char file_name[100];
+    char *buffer = NULL;
+    const char *sep = " ";
+    FILE *stat = NULL;
+    size_t buf_size = 0;
+
+    snprintf(file_name, sizeof(file_name), "/proc/%d/stat", child);
+
+    if ((stat = fopen(file_name, "r"))) {
+      if (getline(&buffer, &buf_size, stat) != -1) {
+        strtok(buffer, sep);             // pid
+        strtok(NULL, sep);               // executable name
+        strtok(NULL, sep);               // state
+        char *token = strtok(NULL, sep); // parent pid
+        parent = strtol(token, NULL, 10);
+      }
+
+      free(buffer);
+      fclose(stat);
+    }
+
+    if (parent) {
+      return (parent == child) ? -1 : parent;
+    }
+
+    return -1;
+  }
+
 public:
   void init() override {
     ipc_repo->register_method("hide-view/run-n-hide", ipc_run_and_hide);
@@ -56,10 +91,20 @@ public:
       [=](nlohmann::json data) -> nlohmann::json {
     WFJSON_EXPECT_FIELD(data, "app", string);
 
-    wf::get_core().run(data["app"]);
+    hidden_pids.push_back(wf::get_core().run(data["app"]));
     wf::get_core().connect(&on_view_mapped);
+
     return wf::ipc::json_ok();
   };
+
+  wayfire_view find_view_by_id(uint id) {
+    for (auto &v : hidden_views) {
+      if (v->get_id() == id) {
+        return v;
+      }
+    }
+    return nullptr;
+  }
 
   wf::signal::connection_t<wf::view_mapped_signal> on_view_mapped =
       [=](wf::view_mapped_signal *ev) {
@@ -67,20 +112,46 @@ public:
         if (!view) {
           return;
         }
-        if (!view->get_data<hide_view_data>()) {
+        bool found = false;
+        pid_t view_pid;
+        wlr_xwayland_surface *xwayland_surface =
+            wlr_xwayland_surface_try_from_wlr_surface(view->get_wlr_surface());
+        if (xwayland_surface) {
+          view_pid = xwayland_surface->pid;
+        } else {
+          wl_client_get_credentials(view->get_client(), &view_pid, 0, 0);
+        }
+        do {
+          for (auto p : hidden_pids) {
+            if (p == view_pid) {
+              found = true;
+              break;
+            }
+          }
+          if (found == true) {
+            break;
+          }
+        } while ((view_pid = get_parent_pid(view_pid)) != -1);
+        if (view_pid != -1 && !view->get_data<hide_view_data>()) {
+          LOGI("Hiding view with ID: ", view->get_id());
+          wf::scene::set_node_enabled(view->get_root_node(), false);
+          wf::scene::set_node_enabled(view->get_root_node(), false);
           hide_view_data hv_data;
           view->store_data(std::make_unique<hide_view_data>(hv_data));
-          wf::scene::set_node_enabled(view->get_root_node(), false);
           view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
+          hidden_views.push_back(view);
+          auto it = std::find(hidden_pids.begin(), hidden_pids.end(), view_pid);
+          if (it != hidden_pids.end()) {
+            hidden_pids.erase(it);
+          }
           wf::view_unmapped_signal unmap_signal;
           unmap_signal.view = view;
-          auto output = view->get_output();
-          if (auto toplevel = toplevel_cast(view)) {
-            output->wset()->remove_view(toplevel);
-          }
           wf::get_core().emit(&unmap_signal);
+          idle_refocus.run_once([=]() { wf::get_core().seat->refocus(); });
+          if (hidden_pids.empty()) {
+            on_view_mapped.disconnect();
+          }
         }
-        on_view_mapped.disconnect();
       };
 
   wf::ipc::method_callback ipc_view_hide =
@@ -137,6 +208,7 @@ public:
     ipc_repo->unregister_method("hide-view/hide");
     ipc_repo->unregister_method("hide-view/unhide");
     ipc_repo->unregister_method("hide-view/run-n-hide");
+    on_view_mapped.disconnect();
   }
 };
 } // namespace hide_view
