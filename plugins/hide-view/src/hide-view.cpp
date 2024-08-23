@@ -38,6 +38,7 @@ SOFTWARE.
 #include <wayfire/view-helpers.hpp>
 #include <wayfire/view-transform.hpp>
 #include <wayfire/view.hpp>
+#include <wayfire/workspace-set.hpp>
 
 namespace wf {
 namespace hide_view {
@@ -115,7 +116,17 @@ public:
         }
         bool found = false;
         pid_t view_pid;
-        wl_client_get_credentials(view->get_client(), &view_pid, 0, 0);
+
+        wlr_xwayland_surface *xwayland_surface = NULL;
+        if (view->get_wlr_surface()) {
+          xwayland_surface = wlr_xwayland_surface_try_from_wlr_surface(
+              view->get_wlr_surface());
+        }
+        if (xwayland_surface) {
+          view_pid = xwayland_surface->pid;
+        } else {
+          wl_client_get_credentials(view->get_client(), &view_pid, 0, 0);
+        }
         do {
           for (auto p : hidden_pids) {
             if (p == view_pid) {
@@ -133,7 +144,7 @@ public:
           wf::scene::set_node_enabled(view->get_root_node(), false);
           hide_view_data hv_data;
           view->store_data(std::make_unique<hide_view_data>(hv_data));
-          view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
+          view->role = wf::VIEW_ROLE_UNMANAGED;
           hidden_views.push_back(view);
           auto it = std::find(hidden_pids.begin(), hidden_pids.end(), view_pid);
           if (it != hidden_pids.end()) {
@@ -157,7 +168,9 @@ public:
       [=](nlohmann::json data) -> nlohmann::json {
     WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
 
-    auto view = wf::ipc::find_view_by_id(data["view-id"]);
+    wayfire_toplevel_view view =
+        toplevel_cast(wf::ipc::find_view_by_id(data["view-id"]));
+
     if (view && view->role == wf::VIEW_ROLE_TOPLEVEL) {
       hide_view_data hv_data;
       view->store_data(std::make_unique<hide_view_data>(hv_data));
@@ -165,7 +178,11 @@ public:
       view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
       auto output = view->get_output();
       if (auto toplevel = toplevel_cast(view)) {
+        auto old_wset = output->wset();
         output->wset()->remove_view(toplevel);
+        auto target_wset = output->wset();
+        wf::emit_view_pre_moved_to_wset_pre(view, old_wset, target_wset);
+        wf::scene::remove_child(view->get_root_node());
       }
 
       return wf::ipc::json_ok();
@@ -181,7 +198,8 @@ public:
     WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
 
     auto view = wf::ipc::find_view_by_id(data["view-id"]);
-    if (view && view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT) {
+    if (view && (view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT ||
+                 view->role == wf::VIEW_ROLE_UNMANAGED)) {
       wf::scene::set_node_enabled(view->get_root_node(), true);
       view->role = wf::VIEW_ROLE_TOPLEVEL;
 
