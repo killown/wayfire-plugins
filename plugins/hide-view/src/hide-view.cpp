@@ -34,10 +34,12 @@ SOFTWARE.
 #include <wayfire/render-manager.hpp>
 #include <wayfire/scene-operations.hpp>
 #include <wayfire/signal-definitions.hpp>
+#include <wayfire/toplevel-view.hpp>
 #include <wayfire/util/duration.hpp>
 #include <wayfire/view-helpers.hpp>
 #include <wayfire/view-transform.hpp>
 #include <wayfire/view.hpp>
+#include <wayfire/window-manager.hpp>
 #include <wayfire/workspace-set.hpp>
 
 namespace wf {
@@ -182,7 +184,6 @@ public:
         output->wset()->remove_view(toplevel);
         auto target_wset = output->wset();
         wf::emit_view_pre_moved_to_wset_pre(view, old_wset, target_wset);
-        wf::scene::remove_child(view->get_root_node());
       }
 
       return wf::ipc::json_ok();
@@ -197,15 +198,16 @@ public:
       [=](nlohmann::json data) -> nlohmann::json {
     WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
 
-    auto view = wf::ipc::find_view_by_id(data["view-id"]);
+    wayfire_toplevel_view view =
+        toplevel_cast(wf::ipc::find_view_by_id(data["view-id"]));
     if (view && (view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT ||
                  view->role == wf::VIEW_ROLE_UNMANAGED)) {
-      wf::scene::set_node_enabled(view->get_root_node(), true);
-      view->role = wf::VIEW_ROLE_TOPLEVEL;
-
       auto new_output = wf::get_core().seat->get_active_output();
       if (auto toplevel = toplevel_cast(view)) {
+        wf::scene::set_node_enabled(toplevel->get_root_node(), true);
+        toplevel->role = wf::VIEW_ROLE_TOPLEVEL;
         new_output->wset()->add_view(toplevel);
+        toplevel->set_output(new_output);
       }
       return wf::ipc::json_ok();
     } else if (!view) {
