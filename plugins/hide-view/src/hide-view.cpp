@@ -205,6 +205,7 @@ public:
       auto new_output = wf::get_core().seat->get_active_output();
       if (auto toplevel = toplevel_cast(view)) {
         wf::scene::set_node_enabled(toplevel->get_root_node(), true);
+        wf::scene::set_node_enabled(toplevel->get_root_node(), true);
         toplevel->role = wf::VIEW_ROLE_TOPLEVEL;
         new_output->wset()->add_view(toplevel);
         toplevel->set_output(new_output);
@@ -218,6 +219,18 @@ public:
   };
 
   void fini() override {
+    for (auto &view : hidden_views) {
+      if (view->get_data<hide_view_data>()) {
+        wf::scene::set_node_enabled(view->get_root_node(), true);
+        wf::scene::set_node_enabled(view->get_root_node(), true);
+        view->release_data<hide_view_data>();
+        wf::view_mapped_signal map_signal;
+        map_signal.view = view;
+        wf::get_core().emit(&map_signal);
+        wf::get_core().seat->focus_view(view);
+        wf::view_bring_to_front(view);
+      }
+    }
     ipc_repo->unregister_method("hide-view/hide");
     ipc_repo->unregister_method("hide-view/unhide");
     ipc_repo->unregister_method("hide-view/run-n-hide");
