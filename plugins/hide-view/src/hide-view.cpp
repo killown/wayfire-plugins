@@ -180,6 +180,7 @@ public:
       view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
       auto output = view->get_output();
       if (auto toplevel = toplevel_cast(view)) {
+        hidden_views.push_back(toplevel);
         auto old_wset = output->wset();
         output->wset()->remove_view(toplevel);
         auto target_wset = output->wset();
@@ -205,7 +206,6 @@ public:
       auto new_output = wf::get_core().seat->get_active_output();
       if (auto toplevel = toplevel_cast(view)) {
         wf::scene::set_node_enabled(toplevel->get_root_node(), true);
-        wf::scene::set_node_enabled(toplevel->get_root_node(), true);
         toplevel->role = wf::VIEW_ROLE_TOPLEVEL;
         new_output->wset()->add_view(toplevel);
         toplevel->set_output(new_output);
@@ -219,12 +219,17 @@ public:
   };
 
   void fini() override {
+    auto new_output = wf::get_core().seat->get_active_output();
     for (auto &view : hidden_views) {
       if (view->get_data<hide_view_data>()) {
+        wayfire_toplevel_view v = toplevel_cast(view);
         wf::scene::set_node_enabled(view->get_root_node(), true);
         wf::scene::set_node_enabled(view->get_root_node(), true);
         view->release_data<hide_view_data>();
         wf::view_mapped_signal map_signal;
+        view->role = wf::VIEW_ROLE_TOPLEVEL;
+        new_output->wset()->add_view(v);
+        view->set_output(new_output);
         map_signal.view = view;
         wf::get_core().emit(&map_signal);
         wf::get_core().seat->focus_view(view);
