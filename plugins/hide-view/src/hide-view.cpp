@@ -176,15 +176,16 @@ public:
     if (view && view->role == wf::VIEW_ROLE_TOPLEVEL) {
       hide_view_data hv_data;
       view->store_data(std::make_unique<hide_view_data>(hv_data));
-      wf::scene::set_node_enabled(view->get_root_node(), false);
-      view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
       auto output = view->get_output();
       if (auto toplevel = toplevel_cast(view)) {
         hidden_views.push_back(toplevel);
         auto old_wset = output->wset();
-        output->wset()->remove_view(toplevel);
-        auto target_wset = output->wset();
+        auto target_wset = nullptr;
         wf::emit_view_pre_moved_to_wset_pre(view, old_wset, target_wset);
+        wf::scene::set_node_enabled(view->get_root_node(), false);
+        view->role = wf::VIEW_ROLE_DESKTOP_ENVIRONMENT;
+        output->wset()->remove_view(toplevel);
+        wf::emit_view_moved_to_wset(view, old_wset, target_wset);
       }
 
       return wf::ipc::json_ok();
@@ -206,9 +207,13 @@ public:
       auto new_output = wf::get_core().seat->get_active_output();
       if (auto toplevel = toplevel_cast(view)) {
         wf::scene::set_node_enabled(toplevel->get_root_node(), true);
+        auto old_wset = nullptr;
+        auto target_wset = new_output->wset();
+        wf::emit_view_pre_moved_to_wset_pre(view, old_wset, target_wset);
         toplevel->role = wf::VIEW_ROLE_TOPLEVEL;
         new_output->wset()->add_view(toplevel);
         toplevel->set_output(new_output);
+        wf::emit_view_moved_to_wset(view, old_wset, target_wset);
       }
       return wf::ipc::json_ok();
     } else if (!view) {
