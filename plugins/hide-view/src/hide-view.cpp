@@ -146,19 +146,23 @@ public:
           wf::scene::set_node_enabled(view->get_root_node(), false);
           hide_view_data hv_data;
           view->store_data(std::make_unique<hide_view_data>(hv_data));
-          view->role = wf::VIEW_ROLE_UNMANAGED;
+
+          wayfire_toplevel_view toplevel = toplevel_cast(view);
+          auto output = view->get_output();
+          auto old_wset = output->wset();
+          auto target_wset = nullptr;
+          wf::emit_view_pre_moved_to_wset_pre(toplevel, old_wset, target_wset);
+
+          toplevel->role = wf::VIEW_ROLE_UNMANAGED;
           hidden_views.push_back(view);
           auto it = std::find(hidden_pids.begin(), hidden_pids.end(), view_pid);
           if (it != hidden_pids.end()) {
             hidden_pids.erase(it);
           }
-          auto output = view->get_output();
-          if (auto toplevel = toplevel_cast(view)) {
-            output->wset()->remove_view(toplevel);
-          }
-
-          output = view->get_output();
-          view->set_output(nullptr);
+          output->wset()->remove_view(toplevel);
+          output = toplevel->get_output();
+          toplevel->set_output(nullptr);
+          wf::emit_view_moved_to_wset(toplevel, old_wset, target_wset);
           idle_refocus.run_once([=]() { wf::get_core().seat->refocus(); });
           if (hidden_pids.empty()) {
             on_view_mapped.disconnect();
