@@ -24,7 +24,9 @@ SOFTWARE.
 
 */
 
+#include <cstring>
 #include <wayfire/core.hpp>
+#include <wayfire/nonstd/wlroots-full.hpp>
 #include <wayfire/output.hpp>
 #include <wayfire/per-output-plugin.hpp>
 #include <wayfire/plugin.hpp>
@@ -33,6 +35,7 @@ SOFTWARE.
 #include <wayfire/plugins/ipc/ipc-method-repository.hpp>
 #include <wayfire/render-manager.hpp>
 #include <wayfire/scene-operations.hpp>
+#include <wayfire/seat.hpp>
 #include <wayfire/signal-definitions.hpp>
 #include <wayfire/toplevel-view.hpp>
 #include <wayfire/util/duration.hpp>
@@ -92,9 +95,7 @@ public:
 
   /* soreau code for run and hide */
   wf::ipc::method_callback ipc_run_and_hide =
-      [=](nlohmann::json data) -> nlohmann::json {
-    WFJSON_EXPECT_FIELD(data, "app", string);
-
+      [=](wf::json_t data) -> wf::json_t {
     hidden_pids.push_back(wf::get_core().run(data["app"]));
     wf::get_core().connect(&on_view_mapped);
 
@@ -170,10 +171,7 @@ public:
         }
       };
 
-  wf::ipc::method_callback ipc_view_hide =
-      [=](nlohmann::json data) -> nlohmann::json {
-    WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
-
+  wf::ipc::method_callback ipc_view_hide = [=](wf::json_t data) -> wf::json_t {
     wayfire_toplevel_view view =
         toplevel_cast(wf::ipc::find_view_by_id(data["view-id"]));
 
@@ -201,9 +199,7 @@ public:
   };
 
   wf::ipc::method_callback ipc_view_unhide =
-      [=](nlohmann::json data) -> nlohmann::json {
-    WFJSON_EXPECT_FIELD(data, "view-id", number_unsigned);
-
+      [=](wf::json_t data) -> wf::json_t {
     wayfire_toplevel_view view =
         toplevel_cast(wf::ipc::find_view_by_id(data["view-id"]));
     if (view && (view->role == wf::VIEW_ROLE_DESKTOP_ENVIRONMENT ||
