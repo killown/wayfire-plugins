@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<wayfire>
+  <plugin name="pixel-color">
+    <_short>Pixel Color</_short>
+    <_long>This plugin gets the pixel color on right click.</_long>
+    <category>Utility</category>
+    <option name="pixel_color_activate" type="button">
+      <_short>Modifier</_short>
+      <_long>Button combination to activate pixel color picker</_long>
+      <default>&lt;shift&gt; &lt;BTN_RIGHT&gt;</default>
+    </option>
+  </plugin>
+</wayfire>
