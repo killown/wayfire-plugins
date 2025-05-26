@@ -1,8 +1,0 @@
-<?xml version="1.0"?>
-<wayfire>
-	<plugin name="example-plugin">
-		<_short>Example Plugin</_short>
-		<_long>Minimal vulkan example.</_long>
-		<category>Utility</category>
-	</plugin>
-</wayfire>
