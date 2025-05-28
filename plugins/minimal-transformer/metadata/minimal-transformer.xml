@@ -2,7 +2,7 @@
 <wayfire>
     <plugin name="minimal-transformer">
         <_short>Minimal Transformer</_short>
-        <_long>This plugin initializes a minimal Vulkan instance when loaded.</_long>
+        <_long>This plugin shrinks any view in Wayfire to demonstrate how the transformer works.</_long>
         <category>Utility</category>
     </plugin>
 </wayfire>
