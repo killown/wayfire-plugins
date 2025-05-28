@@ -2,7 +2,11 @@
 <wayfire>
     <plugin name="minimal-transformer">
         <_short>Minimal Transformer</_short>
+<<<<<<< HEAD
         <_long>This plugin shrinks any view in Wayfire to demonstrate how the transformer works.</_long>
+=======
+        <_long>This plugin does nothing.</_long>
+>>>>>>> 1f33030 (minimal transformer example)
         <category>Utility</category>
     </plugin>
 </wayfire>
