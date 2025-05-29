@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="minimal-transformer">
+        <_short>Minimal Transformer</_short>
+        <_long>This plugin initializes a minimal Vulkan instance when loaded.</_long>
+        <category>Utility</category>
+    </plugin>
+</wayfire>
