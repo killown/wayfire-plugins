@@ -24,6 +24,7 @@ SOFTWARE.
 
 */
 
+#include "wayfire/util.hpp"
 #include <cstring>
 #include <wayfire/core.hpp>
 #include <wayfire/nonstd/wlroots-full.hpp>
