@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="resist-edge">
+        <_short>Resist Edge</_short>
+        <_long>Do something when hit the edge.</_long>
+        <category>Utility</category>
+    </plugin>
+</wayfire>
