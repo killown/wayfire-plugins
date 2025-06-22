@@ -24,6 +24,7 @@ SOFTWARE.
 
 */
 
+#include <chrono>
 #include <wayfire/core.hpp>
 #include <wayfire/input-device.hpp>
 #include <wayfire/output-layout.hpp>
@@ -31,7 +32,7 @@ SOFTWARE.
 #include <wayfire/seat.hpp>
 #include <wayfire/signal-definitions.hpp>
 #include <wayfire/signal-provider.hpp>
-
+#include <wayfire/util.hpp>
 using namespace wf;
 
 class resist_corner_plugin_t : public plugin_interface_t {
@@ -50,9 +51,11 @@ public:
   void fini() override {}
 
 private:
-  const int CORNER_WIDTH = 3;         // width of hot region
+  const int CORNER_WIDTH = 10;        // width of hot region
   const int CORNER_HEIGHT = 50;       // height of hot region
   const double RESISTANCE_FACTOR = 0; // full resistance
+  const uint32_t DEBOUNCE_MS = 1000;  // only allow one call per second
+  std::chrono::steady_clock::time_point last_exec_time = {};
 
   void handle_pointer_motion(input_event_signal<wlr_pointer_motion_event> *ev) {
     pointf_t cursor_pos = wf::get_core().get_cursor_position();
@@ -81,7 +84,15 @@ private:
 
       // FIXME: allow to toggle expo or scale
       if (ev->event->delta_x != 0 || ev->event->delta_y != 0) {
-        wf::get_core().run("alacritty");
+        auto now = std::chrono::steady_clock::now();
+        if (last_exec_time == std::chrono::steady_clock::time_point() ||
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_exec_time)
+                    .count() >= DEBOUNCE_MS) {
+
+          wf::get_core().run("alacritty");
+          last_exec_time = now; // Update last execution time
+        }
       }
     }
   }
