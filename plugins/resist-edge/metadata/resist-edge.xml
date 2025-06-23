@@ -2,7 +2,68 @@
 <wayfire>
     <plugin name="resist-edge">
         <_short>Resist Edge</_short>
-        <_long>Do something when hit the edge.</_long>
-        <category>Utility</category>
+        <_long>
+            Triggers an action when the mouse hits the top-left screen corner.
+        </_long>
+        <category>Desktop</category>
+
+        <!-- Command to execute when entering the edge/corner -->
+        <option name="command" type="string">
+            <_short>Run Command</_short>
+            <_long>
+                A shell command to execute when the cursor enters the hot corner.
+            </_long>
+            <default>alacritty</default>
+        </option>
+
+        <!-- Time to wait before allowing another trigger (in milliseconds) -->
+        <option name="cooldown-time" type="int">
+            <_short>Cooldown Time</_short>
+            <_long>
+                The amount of time (in milliseconds) to wait before allowing another trigger.
+                Prevents accidental multiple executions in quick succession.
+            </_long>
+            <default>500</default>
+            <min>0</min>
+        </option>
+
+        <!-- Resistance strength (0.0 = full resistance, 1.0 = no resistance) -->
+        <option name="resistance" type="double">
+            <_short>Resistance Factor</_short>
+            <_long>
+                Controls how much the mouse is slowed down when hitting the corner.
+                0.0 means full resistance (mouse stops), 1.0 means no resistance.
+            </_long>
+            <default>0.0</default>
+            <min>0.0</min>
+            <max>1.0</max>
+        </option>
+
+        <!-- Corner to activate (top-left, top-right, bottom-left, bottom-right) -->
+        <option name="corner" type="string">
+            <_short>Activation Corner</_short>
+            <_long>
+                Specifies which screen corner will activate the resist edge behavior.
+                Supported values: top-left, top-right, bottom-left, bottom-right
+            </_long>
+            <default>top-left</default>
+    </option>
+
+    <option name="edge-width" type="int">
+        <_short>Edge Width</_short>
+        <_long>The width (in pixels) of the active area along the screen edge.</_long>
+        <default>10</default>
+        <min>1</min>
+        <max>200</max>
+    </option>
+
+    <option name="edge-height" type="int">
+        <_short>Edge Height</_short>
+        <_long>The height (in pixels) of the active area along the screen edge.</_long>
+        <default>50</default>
+        <min>1</min>
+        <max>200</max>
+    </option>
+
     </plugin>
 </wayfire>

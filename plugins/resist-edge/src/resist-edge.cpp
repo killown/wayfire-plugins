@@ -51,11 +51,22 @@ public:
   void fini() override {}
 
 private:
-  const int CORNER_WIDTH = 10;        // width of hot region
-  const int CORNER_HEIGHT = 50;       // height of hot region
-  const double RESISTANCE_FACTOR = 0; // full resistance
-  const uint32_t DEBOUNCE_MS = 1000;  // only allow one call per second
   std::chrono::steady_clock::time_point last_exec_time = {};
+
+  wf::option_wrapper_t<std::string> edge_trigger_command{"resist-edge/command"};
+  wf::option_wrapper_t<int> edge_trigger_cooldown{"resist-edge/cooldown-time"};
+  wf::option_wrapper_t<double> edge_resistance{"resist-edge/resistance"};
+  wf::option_wrapper_t<int> option_width{"resist-edge/edge-width"};
+  wf::option_wrapper_t<int> option_height{"resist-edge/edge-height"};
+
+  const int CORNER_WIDTH = option_width;   // width of hot region
+  const int CORNER_HEIGHT = option_height; // height of hot region
+  // FIXME: require implementation
+  // wf::option_wrapper_t<int> edge{"resist-edge/corner"};
+  const uint32_t DEBOUNCE_MS =
+      edge_trigger_cooldown; // only allow one call per second
+  const double RESISTANCE_FACTOR =
+      edge_resistance; // full resistance by default
 
   void handle_pointer_motion(input_event_signal<wlr_pointer_motion_event> *ev) {
     pointf_t cursor_pos = wf::get_core().get_cursor_position();
@@ -82,7 +93,6 @@ private:
       if (ev->event->delta_y < 0)
         ev->event->delta_y *= RESISTANCE_FACTOR;
 
-      // FIXME: allow to toggle expo or scale
       if (ev->event->delta_x != 0 || ev->event->delta_y != 0) {
         auto now = std::chrono::steady_clock::now();
         if (last_exec_time == std::chrono::steady_clock::time_point() ||
@@ -90,7 +100,7 @@ private:
                 now - last_exec_time)
                     .count() >= DEBOUNCE_MS) {
 
-          wf::get_core().run("alacritty");
+          wf::get_core().run(edge_trigger_command);
           last_exec_time = now; // Update last execution time
         }
       }
