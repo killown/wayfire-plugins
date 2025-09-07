@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="damage-log">
+        <_short>Damage Log</_short>
+        <_long>damage_log - Simple plugin to log repaint events</_long>
+        <category>Utility</category>
+    </plugin>
+</wayfire>
