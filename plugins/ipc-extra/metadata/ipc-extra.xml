@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="ipc-extra">
+        <_short>IPC Extra Utilities</_short>
+        <_long>
+            Provides extra utility methods via the Wayfire IPC socket, 
+            including querying plugin ABI version and determining the stdout 
+            redirection path for the compositor process.
+        </_long>
+        <category>Utility</category>
+    </plugin>
+</wayfire>
