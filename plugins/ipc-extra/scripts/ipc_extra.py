@@ -24,12 +24,8 @@ def get_plugin_abi_version(self, path: str):
     """
     message = get_msg_template("wayfire/get-plugin-abi-version")
     message["data"]["path"] = path
-    # NOTE: The print(message) call is preserved exactly as requested.
-    print(message)
     return self.send_json(message)
 
-
-# Inject the new methods directly into the existing WayfireSocket class
 setattr(WayfireSocket, "get_stdout_redirect_path", get_stdout_redirect_path)
 setattr(WayfireSocket, "get_plugin_abi_version", get_plugin_abi_version)
 
