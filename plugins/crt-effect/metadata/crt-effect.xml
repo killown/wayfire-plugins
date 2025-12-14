@@ -1,0 +1,109 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="crt-effect">
+        <_short>CRT Effect</_short>
+        <_long>Advanced CRT Monitor Emulation with Discrete, Retro, Royale, Perfect, and Cinema modes.</_long>
+        <category>Utility</category>
+
+        <option name="enabled" type="bool">
+            <_short>Enable</_short>
+            <default>false</default>
+        </option>
+
+        <option name="toggle" type="activator">
+            <_short>Toggle Hotkey</_short>
+            <default>&lt;super&gt; KEY_C</default>
+        </option>
+
+        <option name="cycle_mode" type="activator">
+            <_short>Cycle Shader Mode</_short>
+            <_long>Switch between Discrete, Retro, Royale, Perfect, and Cinema modes.</_long>
+            <default>&lt;shift&gt; &lt;super&gt; KEY_C</default>
+        </option>
+
+        <option name="mode" type="string">
+            <_short>Shader Mode</_short>
+            <_long>Choose between 'discrete', 'retro', 'royale', 'perfect', or 'cinema'.</_long>
+            <default>discrete</default>
+        </option>
+
+        <option name="duration" type="int">
+            <_short>Animation Duration</_short>
+            <_long>Duration of the turn-on/off animation in milliseconds.</_long>
+            <default>300</default>
+        </option>
+
+        <option name="distortion" type="bool">
+            <_short>Barrel Distortion</_short>
+            <_long>Apply physical curvature to the screen geometry.</_long>
+            <default>true</default>
+        </option>
+
+        <option name="scanlines" type="bool">
+            <_short>Scanlines</_short>
+            <default>true</default>
+        </option>
+        
+        <option name="vignette" type="bool">
+            <_short>Vignette</_short>
+            <default>true</default>
+        </option>
+        
+        <option name="aberration" type="bool">
+            <_short>Chromatic Aberration</_short>
+            <default>true</default>
+        </option>
+
+        <option name="royale_mask_type" type="string">
+            <_short>Mask Type</_short>
+            <_long>Phosphor layout: 'aperture', 'slot', or 'dot'.</_long>
+            <default>aperture</default>
+        </option>
+
+        <option name="royale_beam_sigma" type="double">
+            <_short>Beam Sharpness</_short>
+            <_long>Width of the electron beam (Lower is sharper). Recommended: 0.25</_long>
+            <default>0.25</default>
+            <min>0.1</min>
+            <max>0.5</max>
+        </option>
+
+        <option name="royale_scanline_weight" type="double">
+            <_short>Scanline Weight</_short>
+            <_long>Visibility of scanlines (0.0 to 1.0).</_long>
+            <default>0.6</default>
+        </option>
+
+        <option name="royale_border_size" type="double">
+            <_short>Border Size</_short>
+            <_long>Thickness of the black bezel border.</_long>
+            <default>0.01</default>
+        </option>
+
+        <option name="royale_brightness" type="double">
+            <_short>Brightness Boost</_short>
+            <_long>Compensate for the darkening effect of the phosphor mask (1.0 to 2.0).</_long>
+            <default>1.15</default>
+            <min>0.5</min>
+            <max>2.0</max>
+        </option>
+
+        <option name="royale_conv_x_r" type="double">
+             <_short>Convergence Red X</_short>
+             <default>0.000</default>
+        </option>
+        <option name="royale_conv_x_b" type="double">
+             <_short>Convergence Blue X</_short>
+             <default>0.000</default>
+        </option>
+         <option name="royale_conv_y_r" type="double">
+             <_short>Convergence Red Y</_short>
+             <default>0.000</default>
+        </option>
+        <option name="royale_conv_y_b" type="double">
+             <_short>Convergence Blue Y</_short>
+             <default>0.000</default>
+        </option>
+
+    </plugin>
+</wayfire>
