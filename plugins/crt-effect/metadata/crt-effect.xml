@@ -21,10 +21,22 @@
             <default>&lt;shift&gt; &lt;super&gt; KEY_C</default>
         </option>
 
+        <option name="reload_shaders" type="activator">
+            <_short>Reload Shaders</_short>
+            <_long>Hot-reload shaders from disk without restarting Wayfire.</_long>
+            <default>&lt;shift&gt; &lt;super&gt; KEY_R</default>
+        </option>
+
         <option name="mode" type="string">
             <_short>Shader Mode</_short>
             <_long>Choose between 'discrete', 'retro', 'royale', 'perfect', or 'cinema'.</_long>
             <default>discrete</default>
+        </option>
+
+        <option name="shader_path" type="string">
+            <_short>Shader Directory</_short>
+            <_long>Path to the folder containing .glsl shader files.</_long>
+            <default>/usr/share/wayfire/crt-effect/shaders</default>
         </option>
 
         <option name="duration" type="int">

@@ -19,3 +19,5 @@ wayfire = dependency('wayfire', version: '>=0.11')
 
 subdir('src')
 subdir('metadata')
+
+install_subdir('shaders', install_dir : join_paths(get_option('datadir'), 'wayfire', 'crt-effect'))
