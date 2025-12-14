@@ -92,8 +92,9 @@ public:
     };
 
     toggle_cb = [=](auto) {
+      // Guard: Do not toggle if no shaders
       if (programs.empty())
-        return false; // Guard: Do not toggle if no shaders
+        return false;
 
       if (state == INACTIVE || state == FADE_OUT) {
         if (output->can_activate_plugin(&grab_interface)) {
@@ -122,6 +123,10 @@ public:
       auto it = std::find(shader_names.begin(), shader_names.end(), current);
       if (it != shader_names.end() && std::next(it) != shader_names.end()) {
         next_mode = *std::next(it);
+      } else if (it != shader_names.end() &&
+                 std::next(it) == shader_names.end()) {
+        // Wrap around to the first shader if we are at the end
+        next_mode = shader_names[0];
       }
 
       auto section = wf::get_core().config->get_section("crt-effect");
@@ -145,6 +150,7 @@ public:
       return true;
     };
 
+    // SAFETY: Try loading shaders first
     bool loaded = false;
     wf::gles::run_in_context([&] { loaded = load_shaders(); });
 
@@ -163,52 +169,81 @@ public:
   }
 
   bool load_shaders() {
-    std::string path_str = opt_shader_path;
-    if (path_str.front() == '~') {
-      const char *home = std::getenv("HOME");
-      if (home)
-        path_str.replace(0, 1, home);
-    }
+    std::vector<std::string> search_paths;
 
-    fs::path shader_dir(path_str);
-
-    // Safety: Check if dir exists
-    if (!fs::exists(shader_dir) || !fs::is_directory(shader_dir)) {
-      LOGE("CRT: Shader directory not found or invalid: ", path_str);
-      programs.clear();
-      shader_names.clear();
-      return false;
-    }
+    search_paths.push_back((std::string)opt_shader_path);
+    search_paths.push_back("~/.local/share/wayfire/crt-effect/shaders");
+    search_paths.push_back("/usr/share/wayfire/crt-effect/shaders");
 
     programs.clear();
     shader_names.clear();
 
-    for (const auto &entry : fs::directory_iterator(shader_dir)) {
-      if (entry.path().extension() == ".glsl" ||
-          entry.path().extension() == ".frag") {
-        std::string name = entry.path().stem().string();
+    bool shaders_found = false;
 
-        std::ifstream t(entry.path());
-        std::string frag_src((std::istreambuf_iterator<char>(t)),
-                             std::istreambuf_iterator<char>());
+    for (auto &path_str : search_paths) {
+      // Expand ~ to HOME if needed
+      if (path_str.front() == '~') {
+        const char *home = std::getenv("HOME");
+        if (home)
+          path_str.replace(0, 1, home);
+      }
 
-        // Safety: Empty file check
-        if (frag_src.empty())
-          continue;
+      fs::path shader_dir(path_str);
 
-        auto prog = std::make_unique<OpenGL::program_t>();
-        prog->set_simple(
-            OpenGL::compile_program(vertex_shader, frag_src.c_str()));
+      // Safety: Check if dir exists
+      if (!fs::exists(shader_dir) || !fs::is_directory(shader_dir)) {
+        continue;
+      }
 
-        programs[name] = std::move(prog);
-        shader_names.push_back(name);
-        LOGI("CRT: Loaded shader: ", name);
+      LOGI("CRT: Searching for shaders in: ", path_str);
+
+      for (const auto &entry : fs::directory_iterator(shader_dir)) {
+        if (entry.path().extension() == ".glsl" ||
+            entry.path().extension() == ".frag") {
+          std::string name = entry.path().stem().string();
+
+          std::ifstream t(entry.path());
+          std::string frag_src((std::istreambuf_iterator<char>(t)),
+                               std::istreambuf_iterator<char>());
+
+          // Safety: Empty file check
+          if (frag_src.empty())
+            continue;
+
+          auto prog = std::make_unique<OpenGL::program_t>();
+          prog->set_simple(
+              OpenGL::compile_program(vertex_shader, frag_src.c_str()));
+
+          if (programs.find(name) == programs.end()) {
+            programs[name] = std::move(prog);
+            shader_names.push_back(name);
+            LOGI("CRT: Loaded shader: ", name);
+          } else if (path_str == (std::string)opt_shader_path) {
+            // Override existing shader with the highest priority config path
+            programs[name] = std::move(prog);
+            LOGI("CRT: Overrode shader: ", name);
+          }
+          shaders_found = true;
+        }
       }
     }
 
-    if (programs.empty()) {
-      LOGE("CRT: No valid .glsl shaders found in ", path_str);
+    // Sort shader_names vector to ensure consistent cycle order
+    std::sort(shader_names.begin(), shader_names.end());
+    // Remove duplicates from shader_names vector (due to overrides)
+    shader_names.erase(std::unique(shader_names.begin(), shader_names.end()),
+                       shader_names.end());
+
+    if (!shaders_found) {
+      LOGE("CRT: No valid .glsl shaders found in any search path.");
       return false;
+    }
+
+    // Set the first shader as the current mode if the current mode is invalid
+    if (programs.find((std::string)opt_mode) == programs.end() &&
+        !shader_names.empty()) {
+      auto section = wf::get_core().config->get_section("crt-effect");
+      section->get_option("mode")->set_value_str(shader_names[0]);
     }
 
     return true;
@@ -216,6 +251,7 @@ public:
 
   void render(wf::auxilliary_buffer_t &source,
               const wf::render_buffer_t &destination) {
+    // SAFETY GUARD: If no shaders, do not render anything.
     if (programs.empty())
       return;
 
@@ -253,7 +289,7 @@ public:
       if (!shader_names.empty())
         mode = shader_names[0];
       else
-        return; // Extra safety guard
+        return;
     }
 
     static const float vertexData[] = {-1.0f, -1.0f, 1.0f,  -1.0f,
