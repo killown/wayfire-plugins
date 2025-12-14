@@ -30,6 +30,11 @@ void main() {
 }
 )";
 
+struct shader_data {
+  std::unique_ptr<OpenGL::program_t> program;
+  bool needs_time = false;
+};
+
 class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
   wf::post_hook_t hook;
   wf::activator_callback toggle_cb;
@@ -71,7 +76,7 @@ class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
   std::chrono::high_resolution_clock::time_point last_frame_time;
   std::chrono::high_resolution_clock::time_point start_time;
 
-  std::map<std::string, std::unique_ptr<OpenGL::program_t>> programs;
+  std::map<std::string, shader_data> programs;
   std::vector<std::string> shader_names;
 
   wf::plugin_activation_data_t grab_interface = {
@@ -210,17 +215,39 @@ public:
           if (frag_src.empty())
             continue;
 
-          auto prog = std::make_unique<OpenGL::program_t>();
-          prog->set_simple(
-              OpenGL::compile_program(vertex_shader, frag_src.c_str()));
+          shader_data data;
+          data.program = std::make_unique<OpenGL::program_t>();
+
+          size_t uniforms_start = frag_src.find("// ==UNIFORMS==");
+          size_t uniforms_end = frag_src.find("// ==END_UNIFORMS==");
+
+          if (uniforms_start != std::string::npos &&
+              uniforms_end != std::string::npos) {
+            std::string metadata =
+                frag_src.substr(uniforms_start, uniforms_end - uniforms_start);
+
+            if (metadata.find("time: true") != std::string::npos) {
+              data.needs_time = true;
+            }
+          }
+
+          auto program_id =
+              OpenGL::compile_program(vertex_shader, frag_src.c_str());
+
+          if (program_id == 0) {
+            LOGE("CRT: Failed to compile shader: ", name, " from ", path_str);
+            continue;
+          }
+
+          data.program->set_simple(program_id);
 
           if (programs.find(name) == programs.end()) {
-            programs[name] = std::move(prog);
+            programs[name] = std::move(data);
             shader_names.push_back(name);
             LOGI("CRT: Loaded shader: ", name);
           } else if (path_str == (std::string)opt_shader_path) {
             // Override existing shader with the highest priority config path
-            programs[name] = std::move(prog);
+            programs[name] = std::move(data);
             LOGI("CRT: Overrode shader: ", name);
           }
           shaders_found = true;
@@ -292,6 +319,9 @@ public:
         return;
     }
 
+    // Find the program data for the current mode
+    auto &data = programs[mode];
+
     static const float vertexData[] = {-1.0f, -1.0f, 1.0f,  -1.0f,
                                        1.0f,  1.0f,  -1.0f, 1.0f};
     static const float coordData[] = {0.0f, 0.0f, 1.0f, 0.0f,
@@ -300,7 +330,7 @@ public:
     wf::gles::run_in_context([&] {
       wf::gles::bind_render_buffer(destination);
 
-      auto &prog = *programs[mode];
+      auto &prog = *data.program;
       prog.use(wf::TEXTURE_TYPE_RGBA);
 
       GL_CALL(glBindTexture(GL_TEXTURE_2D,
@@ -313,6 +343,14 @@ public:
       prog.uniform2f("resolution", (float)destination.get_size().width,
                      (float)destination.get_size().height);
       prog.uniform1f("anim_progress", progression);
+
+      if (data.needs_time) {
+        float time_sec = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             now - start_time)
+                             .count() /
+                         1000.0f;
+        prog.uniform1f("time", time_sec);
+      }
 
       prog.uniform1i("distort_enable", opt_distort);
       prog.uniform1i("scanlines_enable", opt_scanlines);
@@ -348,7 +386,7 @@ public:
       output->render->rem_post(&hook);
     wf::gles::run_in_context_if_gles([&] {
       for (auto &kv : programs) {
-        kv.second->free_resources();
+        kv.second.program->free_resources();
       }
       programs.clear();
     });
