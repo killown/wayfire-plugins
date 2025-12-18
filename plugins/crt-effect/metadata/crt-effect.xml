@@ -27,6 +27,12 @@
             <default>&lt;shift&gt; &lt;super&gt; KEY_R</default>
         </option>
 
+        <option name="reset_default" type="activator">
+            <_short>Reset to Default Mode</_short>
+            <_long>Instantly return to the shader mode defined in the config file.</_long>
+            <default>&lt;ctrl&gt; &lt;super&gt; KEY_C</default>
+        </option>
+
         <option name="mode" type="string">
             <_short>Shader Mode</_short>
             <_long>Choose between 'discrete', 'retro', 'royale', 'perfect', or 'cinema'.</_long>

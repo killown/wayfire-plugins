@@ -17,6 +17,10 @@
 #include <wayfire/render-manager.hpp>
 #include <wayfire/util/log.hpp>
 
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
+
 namespace fs = std::filesystem;
 
 // Standard Passthrough Vertex Shader
@@ -41,10 +45,12 @@ class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
   wf::activator_callback toggle_cb;
   wf::activator_callback cycle_cb;
   wf::activator_callback reload_cb;
+  wf::activator_callback reset_cb;
 
   wf::cairo_text_t osd_text;
   uint64_t osd_start_time = 0;
   const uint64_t OSD_DURATION = 2000;
+  std::string initial_default_mode;
 
   // Config Options
   wf::option_wrapper_t<bool> opt_enable{"crt-effect/enabled"};
@@ -55,6 +61,8 @@ class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
       "crt-effect/cycle_mode"};
   wf::option_wrapper_t<wf::activatorbinding_t> reload_key{
       "crt-effect/reload_shaders"};
+  wf::option_wrapper_t<wf::activatorbinding_t> reset_key{
+      "crt-effect/reset_default"};
   wf::option_wrapper_t<int> opt_duration{"crt-effect/duration"};
 
   // Shared Uniforms
@@ -133,6 +141,8 @@ public:
       return;
     }
 
+    initial_default_mode = (std::string)opt_mode;
+
     hook = [=](wf::auxilliary_buffer_t &source,
                const wf::render_buffer_t &destination) {
       render(source, destination);
@@ -188,6 +198,17 @@ public:
       return true;
     };
 
+    reset_cb = [=](auto) {
+      if (programs.find(initial_default_mode) == programs.end()) {
+        return false;
+      }
+      auto section = wf::get_core().config->get_section("crt-effect");
+      section->get_option("mode")->set_value_str(initial_default_mode);
+      update_osd(initial_default_mode);
+      output->render->damage_whole();
+      return true;
+    };
+
     reload_cb = [=](auto) {
       if (load_shaders()) {
         output->render->damage_whole();
@@ -208,6 +229,7 @@ public:
     output->add_activator(toggle_key, &toggle_cb);
     output->add_activator(cycle_key, &cycle_cb);
     output->add_activator(reload_key, &reload_cb);
+    output->add_activator(reset_key, &reset_cb);
 
     if (opt_enable && loaded) {
       state = ACTIVE;
@@ -437,6 +459,7 @@ public:
     output->rem_binding(&toggle_cb);
     output->rem_binding(&cycle_cb);
     output->rem_binding(&reload_cb);
+    output->rem_binding(&reset_cb);
   }
 };
 
