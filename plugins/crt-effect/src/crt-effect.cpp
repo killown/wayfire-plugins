@@ -162,6 +162,7 @@ public:
           state = FADE_IN;
           start_time = std::chrono::high_resolution_clock::now();
           last_frame_time = std::chrono::high_resolution_clock::now();
+          update_osd(opt_mode);
           output->render->damage_whole();
         }
       } else {
@@ -210,15 +211,9 @@ public:
     };
 
     reload_cb = [=](auto) {
-      if (load_shaders()) {
-        output->render->damage_whole();
-      } else {
-        // If reload fails (folder deleted), disable effect
-        if (state != INACTIVE) {
-          state = INACTIVE;
-          output->render->rem_post(&hook);
-        }
-      }
+      wf::gles::run_in_context([&] { load_shaders(); });
+      output->render->damage_whole();
+      update_osd("Reloaded");
       return true;
     };
 
