@@ -13,6 +13,7 @@
 #include <wayfire/opengl.hpp>
 #include <wayfire/output.hpp>
 #include <wayfire/per-output-plugin.hpp>
+#include <wayfire/plugins/common/cairo-util.hpp>
 #include <wayfire/render-manager.hpp>
 #include <wayfire/util/log.hpp>
 
@@ -40,6 +41,10 @@ class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
   wf::activator_callback toggle_cb;
   wf::activator_callback cycle_cb;
   wf::activator_callback reload_cb;
+
+  wf::cairo_text_t osd_text;
+  uint64_t osd_start_time = 0;
+  const uint64_t OSD_DURATION = 2000;
 
   // Config Options
   wf::option_wrapper_t<bool> opt_enable{"crt-effect/enabled"};
@@ -84,6 +89,43 @@ class wayfire_crt_screen : public wf::per_output_plugin_instance_t {
       .capabilities = 0,
   };
 
+  wf::geometry_t get_osd_geometry() {
+    auto out_size = output->get_screen_size();
+    auto text_size = osd_text.get_size();
+    int x = 50;
+    int y = out_size.height - text_size.height - 50;
+    return wf::construct_box({x, y}, text_size);
+  }
+
+  void update_osd(std::string name) {
+    wf::cairo_text_t::params params;
+    params.font_size = 32;
+    params.bg_color = wf::color_t{0, 0, 0, 0.6};
+    params.text_color = wf::color_t{0.0, 1.0, 0.2, 1.0};
+    osd_text.render_text(name, params);
+    osd_start_time = wf::get_current_time();
+    output->render->damage(get_osd_geometry());
+  }
+
+  wf::effect_hook_t overlay_hook = [=]() {
+    if (wf::get_current_time() - osd_start_time > OSD_DURATION) {
+      return;
+    }
+    auto fb = output->render->get_target_framebuffer();
+    auto geom = get_osd_geometry();
+#if WAYFIRE_API_ABI_VERSION_MACRO < 20250519
+    OpenGL::render_begin(fb);
+    OpenGL::render_transformed_texture(
+        wf::texture_t{osd_text.tex.tex}, geom, fb.get_orthographic_projection(),
+        glm::vec4(1.0), OpenGL::TEXTURE_TRANSFORM_INVERT_Y);
+    OpenGL::render_end();
+#else
+    output->render->get_current_pass()->add_texture(
+        wf::texture_t{osd_text.get_texture()}, fb, geom, fb.geometry);
+#endif
+    output->render->damage(geom);
+  };
+
 public:
   void init() override {
     if (!wf::get_core().is_gles2()) {
@@ -95,6 +137,8 @@ public:
                const wf::render_buffer_t &destination) {
       render(source, destination);
     };
+
+    output->render->add_effect(&overlay_hook, wf::OUTPUT_EFFECT_OVERLAY);
 
     toggle_cb = [=](auto) {
       // Guard: Do not toggle if no shaders
@@ -136,6 +180,8 @@ public:
 
       auto section = wf::get_core().config->get_section("crt-effect");
       section->get_option("mode")->set_value_str(next_mode);
+
+      update_osd(next_mode);
 
       output->render->damage_whole();
       LOGI("CRT: Cycled to mode: ", next_mode);
@@ -357,12 +403,9 @@ public:
       prog.uniform1i("vignette_enable", opt_vignette);
       prog.uniform1i("aberration_enable", opt_aberration);
 
-      int mask_val = 0;
-      std::string m = r_mask_str;
-      if (m == "slot")
-        mask_val = 1;
-      else if (m == "dot")
-        mask_val = 2;
+      int mask_val = ((std::string)r_mask_str == "slot")
+                         ? 1
+                         : (((std::string)r_mask_str == "dot") ? 2 : 0);
 
       prog.uniform1i("r_mask_type", mask_val);
       prog.uniform1f("r_beam_sigma", (float)r_beam_sigma);
@@ -384,6 +427,7 @@ public:
   void fini() override {
     if (state != INACTIVE)
       output->render->rem_post(&hook);
+    output->render->rem_effect(&overlay_hook);
     wf::gles::run_in_context_if_gles([&] {
       for (auto &kv : programs) {
         kv.second.program->free_resources();
