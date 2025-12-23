@@ -43,11 +43,11 @@ void main() {
     // 2. ROLLING BEAM SCANLINES
     if (scanlines_enable) {
         // A. Static Line Structure (Locked to grid)
-        float count = resolution.y * 0.33;
+        float count = resolution.y *  0.333;
         float sl = sin(uvpos.y * count * 6.28318);
         // B. Rolling Refresh Bar (The "One line at a time" feel)
         // This calculates a pulse that travels from top (0.0) to bottom (1.0)
-        float scan_speed = 0.25;
+        float scan_speed = 0.33;
         float beam_pos = fract(time * scan_speed);
         // Calculate distance from the rolling beam to the current pixel
         float dist = abs(uvpos.y - beam_pos);
@@ -68,7 +68,7 @@ void main() {
     if (scanlines_enable) {
         float mesh = sin(uvpos.x * resolution.x * 2.1);
         float mesh_norm = (mesh * 0.5) + 0.5;
-        col *= mix(0.7, 1.0, mesh_norm);
+        col *= mix(0.9, 1.0, mesh_norm);
     }
     // 4. Vignette
     if (vignette_enable) {
@@ -76,7 +76,7 @@ void main() {
         col *= pow(vig * 16.0, 0.06);
     }
     // 5. Final Color Tuning
-    col *= (0.8 + r_brightness);
+    col *= (1.1 + r_brightness);
     float l = dot(col, vec3(0.299, 0.587, 0.114));
     col = mix(vec3(l), col, 1.12);
     col = pow(col, vec3(1.2));
