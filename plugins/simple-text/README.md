@@ -42,7 +42,6 @@ Triggers or updates a notification on the currently focused output.
 | Parameter | Type    | Default | Description                                     |
 | --------- | ------- | ------- | ----------------------------------------------- |
 | text      | string  | ""      | Message to display. Supports UTF-8              |
-| image     | string  | ""      | Absolute path to a PNG/JPG icon                 |
 | font_size | integer | 32      | Pixel height of the text renderer               |
 | x         | integer | 100     | Screen X coordinate                             |
 | y         | integer | 100     | Screen Y coordinate                             |
@@ -56,7 +55,6 @@ Triggers or updates a notification on the currently focused output.
 
     def update_osd(
         text: str = "",
-        image: str = "",
         font_size: int = 32,
         x: int = 100,
         y: int = 100,
