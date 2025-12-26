@@ -55,7 +55,6 @@ Triggers or updates a notification on the currently focused output.
     sock = WayfireSocket()
 
     def update_osd(
-        self,
         text: str = "",
         image: str = "",
         font_size: int = 32,
