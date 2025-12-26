@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="simple-text">
+        <_short>Simple Text</_short>
+        <_long>Displays a persistent or timed text overlay via IPC.</_long>
+        <category>Utility</category>
+        <option name="text" type="string">
+            <_short>Text</_short>
+            <default>Wayfire</default>
+        </option>
+        <option name="font_size" type="int">
+            <_short>Font Size</_short>
+            <default>32</default>
+        </option>
+        <option name="color" type="color">
+            <_short>Color</_short>
+            <default>1.0 1.0 1.0 1.0</default>
+        </option>
+        <option name="timeout" type="int">
+            <_short>Timeout</_short>
+            <default>3000</default>
+        </option>
+    </plugin>
+</wayfire>
