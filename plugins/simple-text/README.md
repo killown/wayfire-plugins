@@ -50,8 +50,6 @@ Triggers or updates a notification on the currently focused output.
 
 ## Python IPC Integration (Python 3.13+)
 
-The following implementation is strictly typed, PEP 8 compliant, and uses modern Python 3.13 dictionary syntax:
-
     from typing import Any
     from wayfire import WayfireSocket
     sock = WayfireSocket()
