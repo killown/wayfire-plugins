@@ -81,7 +81,6 @@ Triggers or updates a notification on the currently focused output.
             "method": "simple-text/update-display",
             "data": {
                 "text": text,
-                "image": image,
                 "font_size": font_size,
                 "x": x,
                 "y": y,
