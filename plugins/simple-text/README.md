@@ -91,7 +91,7 @@ Triggers or updates a notification on the currently focused output.
         return sock.send_json(payload)
 
 ### Usage
-sock.update_osd(
+update_osd(
     text="Volume: 85%",
     x=50,
     y=50,
