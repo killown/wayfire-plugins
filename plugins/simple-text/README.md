@@ -1,4 +1,6 @@
-# Wayfire Simple-Text Plugin Documentation
+# Wayfire Simple-Text Plugin 
+
+simple-text is a overlay plugin that renders transient On-Screen Displays (OSDs) via IPC. It features an Activity-Gated State Machine that intelligently persists notifications until the user is confirmed present via seat activity, ensuring critical system feedback (like volume or battery alerts) is never missed. By operating in the OUTPUT_EFFECT_OVERLAY pass, it guarantees strict input transparency and zero-latency compositing above the standard window scene graph.
 
 ## Installation
 
@@ -68,7 +70,6 @@ Triggers or updates a notification on the currently focused output.
 
         Args:
             text: The message string to display in the overlay.
-            image: Absolute filesystem path to an icon (PNG/JPG).
             font_size: Pixel height of the rendered text.
             x: Horizontal screen coordinate for the overlay origin.
             y: Vertical screen coordinate for the overlay origin.
