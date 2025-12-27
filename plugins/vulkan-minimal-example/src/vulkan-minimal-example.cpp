@@ -1,3 +1,4 @@
+#include <fstream>
 #include <wayfire/core.hpp>
 #include <wayfire/output.hpp>
 #include <wayfire/per-output-plugin.hpp>
@@ -7,179 +8,231 @@
 extern "C" {
 #include <vulkan/vulkan.h>
 #include <wlr/render/vulkan.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
 }
 
 struct VulkanContext {
   VkDevice device = VK_NULL_HANDLE;
   VkQueue queue = VK_NULL_HANDLE;
-  VkCommandPool cmd_pool = VK_NULL_HANDLE;
-  VkCommandBuffer cmd_buffer = VK_NULL_HANDLE;
+  VkCommandPool pool = VK_NULL_HANDLE;
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
 
   VkImage scratch_image = VK_NULL_HANDLE;
-  VkDeviceMemory scratch_memory = VK_NULL_HANDLE;
+  VkDeviceMemory scratch_mem = VK_NULL_HANDLE;
+
+  VkBuffer dump_buffer = VK_NULL_HANDLE;
+  VkDeviceMemory dump_mem = VK_NULL_HANDLE;
 
   ~VulkanContext() {
-    if (device) {
+    if (device != VK_NULL_HANDLE) {
       vkDeviceWaitIdle(device);
       if (scratch_image)
         vkDestroyImage(device, scratch_image, nullptr);
-      if (scratch_memory)
-        vkFreeMemory(device, scratch_memory, nullptr);
-      if (cmd_pool)
-        vkDestroyCommandPool(device, cmd_pool, nullptr);
+      if (scratch_mem)
+        vkFreeMemory(device, scratch_mem, nullptr);
+      if (dump_buffer)
+        vkDestroyBuffer(device, dump_buffer, nullptr);
+      if (dump_mem)
+        vkFreeMemory(device, dump_mem, nullptr);
+      if (pool)
+        vkDestroyCommandPool(device, pool, nullptr);
     }
   }
 };
 
 class wayfire_vk_visible_plugin : public wf::per_output_plugin_instance_t {
   std::unique_ptr<VulkanContext> ctx;
-  wf::effect_hook_t render_hook;
+  bool has_dumped = false;
 
 public:
   void init() override {
-    if (!wf::get_core().is_vulkan()) {
-      LOGE("Wayfire is NOT in Vulkan mode.");
+    if (!wf::get_core().is_vulkan())
       return;
-    }
 
     ctx = std::make_unique<VulkanContext>();
     if (!initialize_vulkan_resources()) {
-      LOGE("Failed to initialize Vulkan resources.");
       ctx.reset();
       return;
     }
 
-    render_hook = [=]() { this->render_frame(); };
-    output->render->add_effect(&render_hook, wf::OUTPUT_EFFECT_POST);
-
-    LOGI("Vulkan Plugin Initialized: Rendering to internal scratch image.");
+    output->render->add_post(&render_hook);
+    output->render->damage_whole();
   }
 
   void fini() override {
-    if (output)
-      output->render->rem_effect(&render_hook);
+    output->render->rem_post(&render_hook);
     ctx.reset();
   }
 
 private:
-  uint32_t find_memory_type(VkPhysicalDevice physical_device,
-                            uint32_t type_filter,
-                            VkMemoryPropertyFlags properties) {
+  uint32_t find_memory_type(VkPhysicalDevice pd, uint32_t filter,
+                            VkMemoryPropertyFlags props) {
     VkPhysicalDeviceMemoryProperties mem_props;
-    vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
+    vkGetPhysicalDeviceMemoryProperties(pd, &mem_props);
     for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
-      if ((type_filter & (1 << i)) &&
-          (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+      if ((filter & (1 << i)) &&
+          (mem_props.memoryTypes[i].propertyFlags & props) == props)
         return i;
-      }
     }
     return 0;
   }
 
-  bool initialize_vulkan_resources() {
-    auto *wlr_renderer = wf::get_core().renderer;
-    ctx->device = wlr_vk_renderer_get_device(wlr_renderer);
+  void transition_layout(VkCommandBuffer cmd, VkImage img, VkImageLayout old_ly,
+                         VkImageLayout new_ly) {
+    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = old_ly;
+    barrier.newLayout = new_ly;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = img;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.srcAccessMask =
+        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask =
+        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
+  }
 
-    uint32_t q_fam = wlr_vk_renderer_get_queue_family(wlr_renderer);
-    vkGetDeviceQueue(ctx->device, q_fam, 0, &ctx->queue);
+  bool initialize_vulkan_resources() {
+    auto *renderer = wf::get_core().renderer;
+    ctx->device = wlr_vk_renderer_get_device(renderer);
+    uint32_t family = wlr_vk_renderer_get_queue_family(renderer);
+    vkGetDeviceQueue(ctx->device, family, 0, &ctx->queue);
 
     VkCommandPoolCreateInfo pool_info = {
         VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    pool_info.queueFamilyIndex = q_fam;
+    pool_info.queueFamilyIndex = family;
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    if (vkCreateCommandPool(ctx->device, &pool_info, nullptr, &ctx->cmd_pool) !=
-        VK_SUCCESS)
-      return false;
+    vkCreateCommandPool(ctx->device, &pool_info, nullptr, &ctx->pool);
 
-    VkCommandBufferAllocateInfo alloc_info = {
+    VkCommandBufferAllocateInfo cb_info = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    alloc_info.commandPool = ctx->cmd_pool;
-    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_info.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(ctx->device, &alloc_info, &ctx->cmd_buffer) !=
-        VK_SUCCESS)
-      return false;
+    cb_info.commandPool = ctx->pool;
+    cb_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cb_info.commandBufferCount = 1;
+    vkAllocateCommandBuffers(ctx->device, &cb_info, &ctx->cmd);
 
-    // Create Scratch Image (100x100 Red Target)
-    VkImageCreateInfo image_info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.extent.width = 100;
-    image_info.extent.height = 100;
-    image_info.extent.depth = 1;
-    image_info.mipLevels = 1;
-    image_info.arrayLayers = 1;
-    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
-    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_info.usage =
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    VkImageCreateInfo img_info = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    img_info.imageType = VK_IMAGE_TYPE_2D;
+    img_info.extent = {500, 500, 1};
+    img_info.mipLevels = 1;
+    img_info.arrayLayers = 1;
+    img_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    img_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_info.usage =
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    img_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    vkCreateImage(ctx->device, &img_info, nullptr, &ctx->scratch_image);
 
-    if (vkCreateImage(ctx->device, &image_info, nullptr, &ctx->scratch_image) !=
-        VK_SUCCESS)
-      return false;
-
-    // Allocate Memory for Image
     VkMemoryRequirements mem_reqs;
     vkGetImageMemoryRequirements(ctx->device, ctx->scratch_image, &mem_reqs);
 
-    // We need the physical device to find memory type. Retrieve via wlroots
-    VkPhysicalDevice physical_device =
-        wlr_vk_renderer_get_physical_device(wlr_renderer);
+    VkMemoryAllocateInfo mem_alloc = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mem_alloc.allocationSize = mem_reqs.size;
+    mem_alloc.memoryTypeIndex = find_memory_type(
+        wlr_vk_renderer_get_physical_device(renderer), mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkAllocateMemory(ctx->device, &mem_alloc, nullptr, &ctx->scratch_mem);
+    vkBindImageMemory(ctx->device, ctx->scratch_image, ctx->scratch_mem, 0);
 
-    VkMemoryAllocateInfo alloc_mem_info = {
-        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    alloc_mem_info.allocationSize = mem_reqs.size;
-    alloc_mem_info.memoryTypeIndex =
-        find_memory_type(physical_device, mem_reqs.memoryTypeBits,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkBufferCreateInfo buf_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    buf_info.size = 500 * 500 * 4;
+    buf_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    vkCreateBuffer(ctx->device, &buf_info, nullptr, &ctx->dump_buffer);
 
-    if (vkAllocateMemory(ctx->device, &alloc_mem_info, nullptr,
-                         &ctx->scratch_memory) != VK_SUCCESS)
-      return false;
-    vkBindImageMemory(ctx->device, ctx->scratch_image, ctx->scratch_memory, 0);
+    vkGetBufferMemoryRequirements(ctx->device, ctx->dump_buffer, &mem_reqs);
+    mem_alloc.allocationSize = mem_reqs.size;
+    mem_alloc.memoryTypeIndex = find_memory_type(
+        wlr_vk_renderer_get_physical_device(renderer), mem_reqs.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vkAllocateMemory(ctx->device, &mem_alloc, nullptr, &ctx->dump_mem);
+    vkBindBufferMemory(ctx->device, ctx->dump_buffer, ctx->dump_mem, 0);
 
     return true;
   }
 
-  void render_frame() {
-    if (!ctx || !ctx->cmd_buffer)
-      return;
+  void dump_to_tmp() {
+    void *data;
+    vkMapMemory(ctx->device, ctx->dump_mem, 0, 500 * 500 * 4, 0, &data);
+    std::ofstream f("/tmp/vulkan_debug_dump.ppm", std::ios::binary);
+    f << "P6\n500 500\n255\n";
+    uint8_t *pixels = (uint8_t *)data;
+    for (int i = 0; i < 500 * 500; i++) {
+      f.write((char *)&pixels[i * 4], 3);
+    }
+    f.close();
+    vkUnmapMemory(ctx->device, ctx->dump_mem);
+    LOGI("Vulkan debug dump written to /tmp/vulkan_debug_dump.ppm");
+    has_dumped = true;
+  }
+
+  wf::post_hook_t render_hook = [=](wf::auxilliary_buffer_t &source,
+                                    const wf::render_buffer_t &destination) {
+    auto *renderer = wf::get_core().renderer;
+    auto *dest_tex =
+        wlr_texture_from_buffer(renderer, destination.get_buffer());
+    struct wlr_vk_image_attribs attribs;
+    wlr_vk_texture_get_image_attribs(dest_tex, &attribs);
 
     VkCommandBufferBeginInfo begin_info = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(ctx->cmd_buffer, &begin_info);
+    vkBeginCommandBuffer(ctx->cmd, &begin_info);
 
-    VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.image = ctx->scratch_image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    transition_layout(ctx->cmd, ctx->scratch_image, VK_IMAGE_LAYOUT_UNDEFINED,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    vkCmdPipelineBarrier(ctx->cmd_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &barrier);
+    VkClearColorValue red_color = {{1.0f, 0.0f, 0.0f, 1.0f}};
+    VkImageSubresourceRange sub_range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(ctx->cmd, ctx->scratch_image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &red_color, 1,
+                         &sub_range);
 
-    // Clear RED
-    VkClearColorValue color = {{1.0f, 0.0f, 0.0f, 1.0f}};
-    vkCmdClearColorImage(ctx->cmd_buffer, ctx->scratch_image,
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1,
-                         &barrier.subresourceRange);
+    transition_layout(ctx->cmd, ctx->scratch_image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    transition_layout(ctx->cmd, attribs.image,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-    vkEndCommandBuffer(ctx->cmd_buffer);
+    VkImageBlit blit_region = {};
+    blit_region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit_region.srcOffsets[1] = {500, 500, 1};
+    blit_region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit_region.dstOffsets[0] = {100, 100, 0};
+    blit_region.dstOffsets[1] = {600, 600, 1};
+    vkCmdBlitImage(ctx->cmd, ctx->scratch_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, attribs.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit_region,
+                   VK_FILTER_NEAREST);
+
+    VkBufferImageCopy copy_region = {};
+    copy_region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copy_region.imageExtent = {500, 500, 1};
+    vkCmdCopyImageToBuffer(ctx->cmd, ctx->scratch_image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           ctx->dump_buffer, 1, &copy_region);
+
+    transition_layout(ctx->cmd, attribs.image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    vkEndCommandBuffer(ctx->cmd);
 
     VkSubmitInfo submit_info = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &ctx->cmd_buffer;
-
+    submit_info.pCommandBuffers = &ctx->cmd;
     vkQueueSubmit(ctx->queue, 1, &submit_info, VK_NULL_HANDLE);
     vkQueueWaitIdle(ctx->queue);
 
-    // LOGI("Vulkan Frame Completed"); // Uncomment to flood logs as proof
-  }
+    if (!has_dumped)
+      dump_to_tmp();
+    wlr_texture_destroy(dest_tex);
+  };
 };
 
 DECLARE_WAYFIRE_PLUGIN(wf::per_output_plugin_t<wayfire_vk_visible_plugin>);
