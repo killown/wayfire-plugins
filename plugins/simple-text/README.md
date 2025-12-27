@@ -1,4 +1,6 @@
-# Wayfire Simple-Text Plugin Documentation
+# Wayfire Simple-Text Plugin 
+
+simple-text is a overlay plugin that renders transient On-Screen Displays (OSDs) via IPC. It features an Activity-Gated State Machine that intelligently persists notifications until the user is confirmed present via seat activity, ensuring critical system feedback (like volume or battery alerts) is never missed. By operating in the OUTPUT_EFFECT_OVERLAY pass, it guarantees strict input transparency and zero-latency compositing above the standard window scene graph.
 
 ## Installation
 
@@ -42,7 +44,6 @@ Triggers or updates a notification on the currently focused output.
 | Parameter | Type    | Default | Description                                     |
 | --------- | ------- | ------- | ----------------------------------------------- |
 | text      | string  | ""      | Message to display. Supports UTF-8              |
-| image     | string  | ""      | Absolute path to a PNG/JPG icon                 |
 | font_size | integer | 32      | Pixel height of the text renderer               |
 | x         | integer | 100     | Screen X coordinate                             |
 | y         | integer | 100     | Screen Y coordinate                             |
@@ -50,16 +51,12 @@ Triggers or updates a notification on the currently focused output.
 
 ## Python IPC Integration (Python 3.13+)
 
-The following implementation is strictly typed, PEP 8 compliant, and uses modern Python 3.13 dictionary syntax:
-
     from typing import Any
     from wayfire import WayfireSocket
     sock = WayfireSocket()
 
     def update_osd(
-        self,
         text: str = "",
-        image: str = "",
         font_size: int = 32,
         x: int = 100,
         y: int = 100,
@@ -73,7 +70,6 @@ The following implementation is strictly typed, PEP 8 compliant, and uses modern
 
         Args:
             text: The message string to display in the overlay.
-            image: Absolute filesystem path to an icon (PNG/JPG).
             font_size: Pixel height of the rendered text.
             x: Horizontal screen coordinate for the overlay origin.
             y: Vertical screen coordinate for the overlay origin.
@@ -86,7 +82,6 @@ The following implementation is strictly typed, PEP 8 compliant, and uses modern
             "method": "simple-text/update-display",
             "data": {
                 "text": text,
-                "image": image,
                 "font_size": font_size,
                 "x": x,
                 "y": y,
@@ -94,3 +89,13 @@ The following implementation is strictly typed, PEP 8 compliant, and uses modern
             },
         }
         return sock.send_json(payload)
+
+### Usage
+update_osd(
+    text="Volume: 85%",
+    x=50,
+    y=50,
+    timeout=2000
+)
+
+
