@@ -6,7 +6,7 @@ Alright, let's get into the weeds. If you’re here, you probably realized that 
 
 Normally, a plugin is a guest in Wayfire’s house. You use Wayfire’s functions, and Wayfire handles the hardware. But in our case, we’re more like a contractor who brings their own tools but uses the house’s electricity. We don't create a new Vulkan Instance (the connection to the driver) or a new Device (the connection to the card). We use the ones Wayfire already has open. This keeps everything in one "context" so the GPU doesn't have to switch gears constantly.
 
-### 1\. The Borrowed Handles
+### The Borrowed Handles
 
 We use wlr_vk_renderer_get_device and wlr_vk_renderer_get_physical_device. These are the golden keys. They let us grab the specific handles to your AMD or NVIDIA card that the compositor is currently using. By using the same Queue Family, we can submit our own custom command buffers on the same lane that the desktop is using for rendering.
 
