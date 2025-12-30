@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="vulkan-animation-example">
+        <_short>Vulkan Animation Example</_short>
+        <_long>A pioneer plugin demonstrating raw Vulkan bypass and animation logic.</_long>
+        <category>Utility</category>
+
+        <option name="speed" type="double">
+            <_short>Animation Speed</_short>
+            <_long>Sets the speed of the square's movement.</_long>
+            <default>2.5</default>
+            <min>0.1</min>
+            <max>10.0</max>
+        </option>
+
+        <option name="size" type="int">
+            <_short>Square Size</_short>
+            <_long>Base size of the animated square.</_long>
+            <default>100</default>
+            <min>10</min>
+            <max>400</max>
+        </option>
+    </plugin>
+</wayfire>
