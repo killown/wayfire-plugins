@@ -502,10 +502,11 @@ private:
                         nullptr};
     vkQueueSubmit(ctx->queue, 1, &sub, ctx->fence);
 
-    // Standard Wayfire blit: source is the original frame,
-    // destination is the output. Geometry defines the target area.
     wf::geometry_t g{0, 0, (int)ctx->extent.width, (int)ctx->extent.height};
     wlr_fbox box{0, 0, (float)g.width, (float)g.height};
+    // The issue is here, the blit call we are using completely ignores that
+    // work and just repaints the original frame ? who knows If you ever try
+    // this plugin again, we should start from here.
     destination.blit(source, box, g, WLR_SCALE_FILTER_BILINEAR);
   };
 
