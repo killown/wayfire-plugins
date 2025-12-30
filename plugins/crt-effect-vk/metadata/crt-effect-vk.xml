@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<wayfire>
+    <plugin name="crt-effect-vk">
+        <_short>CRT Effect (Vulkan)</_short>
+        <_long>A high-performance CRT shader suite ported to the Vulkan backend.</_long>
+        <category>Utility</category>
+
+        <option name="enabled" type="bool">
+            <default>true</default>
+        </option>
+        <option name="duration" type="int">
+            <default>1000</default>
+        </option>
+        <option name="mode" type="string">
+            <default>crt</default>
+        </option>
+        <option name="shader_path" type="string">
+            <default>~/.local/share/wayfire/crt-effect/shaders</default>
+        </option>
+
+        <option name="toggle" type="activator">
+            <default>&lt;super&gt; &lt;alt&gt; KEY_C</default>
+        </option>
+        <option name="cycle_mode" type="activator">
+            <default>&lt;super&gt; &lt;alt&gt; KEY_N</default>
+        </option>
+        <option name="reload_shaders" type="activator">
+            <default>&lt;super&gt; &lt;alt&gt; KEY_R</default>
+        </option>
+        <option name="reset_default" type="activator">
+            <default>&lt;super&gt; &lt;alt&gt; KEY_BACKSPACE</default>
+        </option>
+
+        <option name="distortion" type="bool">
+            <default>true</default>
+        </option>
+        <option name="scanlines" type="bool">
+            <default>true</default>
+        </option>
+        <option name="vignette" type="bool">
+            <default>true</default>
+        </option>
+        <option name="aberration" type="bool">
+            <default>true</default>
+        </option>
+
+        <option name="royale_mask_type" type="int">
+            <default>1</default>
+            <min>0</min>
+            <max>2</max>
+        </option>
+        <option name="royale_beam_sigma" type="double">
+            <default>0.5</default>
+        </option>
+        <option name="royale_scanline_weight" type="double">
+            <default>0.3</default>
+        </option>
+        <option name="royale_border_size" type="double">
+            <default>0.05</default>
+        </option>
+        <option name="royale_brightness" type="double">
+            <default>1.2</default>
+        </option>
+
+        <option name="royale_conv_x_r" type="double">
+            <default>0.001</default>
+        </option>
+        <option name="royale_conv_x_b" type="double">
+            <default>-0.001</default>
+        </option>
+        <option name="royale_conv_y_r" type="double">
+            <default>0.0</default>
+        </option>
+        <option name="royale_conv_y_b" type="double">
+            <default>0.0</default>
+        </option>
+    </plugin>
+</wayfire>
