@@ -5,13 +5,11 @@
 #include <wayfire/util/duration.hpp>
 #include <wayfire/util/log.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <vector>
 
 extern "C" {
 #include <vulkan/vulkan.h>
@@ -99,6 +97,16 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
   wf::option_wrapper_t<wf::activatorbinding_t> toggle_key{
       "crt-effect-vk/toggle"};
   wf::option_wrapper_t<wf::activatorbinding_t> cycle_key{"crt-effect-vk/cycle"};
+
+  wf::option_wrapper_t<bool> opt_scanlines{"crt-effect-vk/scanlines_enable"};
+  wf::option_wrapper_t<bool> opt_distort{"crt-effect-vk/distort_enable"};
+  wf::option_wrapper_t<int> opt_mask_type{"crt-effect-vk/mask_type"};
+  wf::option_wrapper_t<double> opt_beam_sigma{"crt-effect-vk/beam_sigma"};
+  wf::option_wrapper_t<double> opt_scanline_wt{"crt-effect-vk/scanline_weight"};
+  wf::option_wrapper_t<double> opt_brightness{"crt-effect-vk/brightness"};
+  wf::option_wrapper_t<double> opt_border_size{"crt-effect-vk/border_size"};
+  wf::option_wrapper_t<double> opt_conv_xr{"crt-effect-vk/conv_x_r"};
+  wf::option_wrapper_t<double> opt_conv_xb{"crt-effect-vk/conv_x_b"};
 
   bool ends_with(const std::string &str, const std::string &suffix) {
     return str.size() >= suffix.size() &&
@@ -227,6 +235,15 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
                                             start_time)
                    .count();
     pcs.progress = (float)progression;
+
+    pcs.mask_type = (int32_t)opt_mask_type;
+    pcs.beam_sigma = (float)opt_beam_sigma;
+    pcs.border_size = (float)opt_border_size;
+    pcs.scanline_wt = (float)opt_scanline_wt;
+    pcs.brightness = (float)opt_brightness;
+    pcs.conv_x[0] = (float)opt_conv_xr;
+    pcs.conv_x[1] = (float)opt_conv_xb;
+    pcs.distort = (opt_distort && opt_scanlines) ? 1 : 0;
 
     vkCmdPushConstants(ctx->cmd, pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pcs), &pcs);
