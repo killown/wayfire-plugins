@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<wayfire>
+  <plugin name="inertial-view-vk">
+    <_short>Inertial View Vk</_short>
+    <_long>Vulkan-ready Wayfire plugin.</_long>
+    <category>Utility</category>
+  </plugin>
+</wayfire>
