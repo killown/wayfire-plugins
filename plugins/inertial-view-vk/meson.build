@@ -9,6 +9,7 @@ project(
     ]
 )
 
+# Detect home directory for default prefix if not set
 home_dir = run_command('sh', '-c', 'echo $HOME', check: true).stdout().strip()
 
 add_project_arguments(
