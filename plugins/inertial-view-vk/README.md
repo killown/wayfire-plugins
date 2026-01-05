@@ -12,5 +12,6 @@ This is still a work in progress. I'm currently fine-tuning the math in the rend
 
 
 
-https://github.com/user-attachments/assets/cd8647c7-c9c6-4ad3-9d2a-f83cc2abbc23
+https://github.com/user-attachments/assets/e4547e2b-c248-4158-9159-e13638ae09e8
+
 
