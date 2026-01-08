@@ -1,5 +1,6 @@
 #include "vulkan-context.hpp"
 #include <fstream>
+#include <shaderc/shaderc.hpp>
 #include <wayfire/util/log.hpp>
 
 VulkanContext::VulkanContext(wlr_renderer *renderer) {
@@ -64,18 +65,34 @@ void VulkanContext::wait_idle() {
     vkDeviceWaitIdle(device);
 }
 
-VkShaderModule VulkanContext::load_shader(const std::string &path) {
-  std::ifstream file(path, std::ios::ate | std::ios::binary);
+VkShaderModule VulkanContext::load_shader(const std::string &path,
+                                          shaderc_shader_kind kind) {
+  std::ifstream file(path);
   if (!file.is_open())
     return VK_NULL_HANDLE;
-  size_t size = (size_t)file.tellg();
-  std::vector<char> buffer(size);
-  file.seekg(0);
-  file.read(buffer.data(), size);
+
+  std::string source((std::istreambuf_iterator<char>(file)),
+                     std::istreambuf_iterator<char>());
+
+  shaderc::Compiler compiler;
+  shaderc::CompileOptions options;
+  options.SetOptimizationLevel(shaderc_optimization_level_performance);
+
+  shaderc::SpvCompilationResult result =
+      compiler.CompileGlslToSpv(source, kind, path.c_str(), options);
+
+  if (result.GetCompilationStatus() != shaderc_compilation_status_success) {
+    LOGE("Shader compilation error: ", result.GetErrorMessage());
+    return VK_NULL_HANDLE;
+  }
+
+  std::vector<uint32_t> spirv(result.cbegin(), result.cend());
+
   VkShaderModuleCreateInfo ci{};
   ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  ci.codeSize = buffer.size();
-  ci.pCode = reinterpret_cast<const uint32_t *>(buffer.data());
+  ci.codeSize = spirv.size() * sizeof(uint32_t);
+  ci.pCode = spirv.data();
+
   VkShaderModule mod;
   vkCreateShaderModule(device, &ci, nullptr, &mod);
   return mod;
@@ -162,8 +179,8 @@ void VulkanContext::setup_pipeline() {
   const char *home = getenv("HOME");
   std::string base = (home ? std::string(home) : "") +
                      "/.local/share/wayfire/inertial-vk/shaders/";
-  vert_mod = load_shader(base + "inertial.vert.spv");
-  frag_mod = load_shader(base + "inertial.frag.spv");
+  vert_mod = load_shader(base + "inertial.vert", shaderc_glsl_vertex_shader);
+  frag_mod = load_shader(base + "inertial.frag", shaderc_glsl_fragment_shader);
   if (!vert_mod || !frag_mod)
     return;
 

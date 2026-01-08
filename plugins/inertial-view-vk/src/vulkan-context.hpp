@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <shaderc/shaderc.hpp>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -48,7 +49,7 @@ public:
   void wait_idle();
   void ensure_scratch(VkExtent2D ext);
   void setup_pipeline();
-  VkShaderModule load_shader(const std::string &path);
+  VkShaderModule load_shader(const std::string &path, shaderc_shader_kind kind);
   void insert_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_ly,
                       VkImageLayout new_ly, VkAccessFlags src_acc,
                       VkAccessFlags dst_acc, VkPipelineStageFlags src_stg,

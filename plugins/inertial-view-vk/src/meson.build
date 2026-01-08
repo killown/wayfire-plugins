@@ -9,6 +9,7 @@ endif
 wlroots = dependency('wlroots-0.19')
 vulkan  = dependency('vulkan')
 threads = dependency('threads')
+shaderc = dependency('shaderc')
 
 shared_module(
     'inertial-view-vk',
@@ -21,7 +22,8 @@ shared_module(
         wayfire, 
         wlroots, 
         vulkan, 
-        threads
+        threads,
+        shaderc
     ],
     install: true,
     install_dir: install_dir_lib,

@@ -9,7 +9,6 @@ project(
     ]
 )
 
-# Detect home directory for default prefix if not set
 home_dir = run_command('sh', '-c', 'echo $HOME', check: true).stdout().strip()
 
 add_project_arguments(
@@ -23,6 +22,9 @@ add_project_link_arguments(
 )
 
 wayfire = dependency('wayfire')
+wlroots = dependency('wlroots-0.19')
+vulkan  = dependency('vulkan')
+shaderc = dependency('shaderc')
 
 subdir('src')
 subdir('metadata')
