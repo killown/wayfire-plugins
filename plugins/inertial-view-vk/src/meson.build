@@ -6,11 +6,6 @@ else
     install_dir_lib = join_paths(get_option('prefix'), 'lib/wayfire')
 endif
 
-wlroots = dependency('wlroots-0.19')
-vulkan  = dependency('vulkan')
-threads = dependency('threads')
-shaderc = dependency('shaderc')
-
 shared_module(
     'inertial-view-vk',
     [
@@ -27,6 +22,7 @@ shared_module(
     ],
     install: true,
     install_dir: install_dir_lib,
-    name_prefix: 'lib',
-    cpp_args: ['-DWLR_USE_UNSTABLE', '-DWAYFIRE_PLUGIN']
+    name_prefix: 'lib'
 )
+
+install_subdir('shaders', install_dir: wayfire_share_dir)

@@ -176,11 +176,11 @@ void VulkanContext::ensure_scratch(VkExtent2D ext) {
 }
 
 void VulkanContext::setup_pipeline() {
-  const char *home = getenv("HOME");
-  std::string base = (home ? std::string(home) : "") +
-                     "/.local/share/wayfire/inertial-vk/shaders/";
+  std::string base = SHADER_PATH;
+
   vert_mod = load_shader(base + "inertial.vert", shaderc_glsl_vertex_shader);
   frag_mod = load_shader(base + "inertial.frag", shaderc_glsl_fragment_shader);
+
   if (!vert_mod || !frag_mod)
     return;
 
