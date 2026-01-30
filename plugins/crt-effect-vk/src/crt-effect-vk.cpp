@@ -5,11 +5,13 @@
 #include <wayfire/util/duration.hpp>
 #include <wayfire/util/log.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 extern "C" {
 #include <vulkan/vulkan.h>
@@ -49,6 +51,8 @@ struct VulkanContext {
   VkImageView scratch_view = VK_NULL_HANDLE;
   VkFramebuffer framebuffer = VK_NULL_HANDLE;
   VkExtent2D extent = {0, 0};
+
+  PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2 = nullptr;
 
   ~VulkanContext() {
     if (device != VK_NULL_HANDLE) {
@@ -113,39 +117,18 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
            str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
   }
 
-  void insert_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout old_ly,
-                      VkImageLayout new_ly, VkAccessFlags src_acc,
-                      VkAccessFlags dst_acc, VkPipelineStageFlags src_stg,
-                      VkPipelineStageFlags dst_stg) {
-    VkImageMemoryBarrier b;
-    std::memset(&b, 0, sizeof(b));
-    b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    b.srcAccessMask = src_acc;
-    b.dstAccessMask = dst_acc;
-    b.oldLayout = old_ly;
-    b.newLayout = new_ly;
-    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    b.image = image;
-    b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    b.subresourceRange.levelCount = 1;
-    b.subresourceRange.layerCount = 1;
-    vkCmdPipelineBarrier(cmd, src_stg, dst_stg, 0, 0, nullptr, 0, nullptr, 1,
-                         &b);
-  }
-
   wf::post_hook_t render_hook = [this](wf::auxilliary_buffer_t &source,
                                        const wf::render_buffer_t &destination) {
-    if (!pipeline || !ctx || ctx->device == VK_NULL_HANDLE)
+    if (!pipeline || !ctx || ctx->device == VK_NULL_HANDLE ||
+        !ctx->vkCmdPipelineBarrier2) {
       return;
+    }
 
     vkWaitForFences(ctx->device, 1, &ctx->fence, VK_TRUE, UINT64_MAX);
     vkResetFences(ctx->device, 1, &ctx->fence);
 
-    VkExtent2D ext;
-    ext.width = (uint32_t)destination.get_size().width;
-    ext.height = (uint32_t)destination.get_size().height;
-
+    VkExtent2D ext = {(uint32_t)destination.get_size().width,
+                      (uint32_t)destination.get_size().height};
     if (ctx->extent.width != ext.width || ctx->extent.height != ext.height) {
       reallocate_scratch(ext);
     }
@@ -160,65 +143,85 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
     wlr_vk_texture_get_image_attribs(src_tex, &src_attr);
     wlr_vk_texture_get_image_attribs(dst_tex, &dst_attr);
 
-    VkImageView src_view;
-    VkImageViewCreateInfo iv_ci;
-    std::memset(&iv_ci, 0, sizeof(iv_ci));
+    // Image View (Using {} to ensure all fields are zeroed)
+    VkImageViewCreateInfo iv_ci{};
     iv_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     iv_ci.image = src_attr.image;
     iv_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     iv_ci.format = src_attr.format;
-    iv_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    iv_ci.subresourceRange.levelCount = 1;
-    iv_ci.subresourceRange.layerCount = 1;
+    iv_ci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkImageView src_view;
     vkCreateImageView(ctx->device, &iv_ci, nullptr, &src_view);
 
-    VkDescriptorImageInfo d_info;
+    // Descriptor Set Update
+    VkDescriptorImageInfo d_info{};
     d_info.sampler = sampler;
     d_info.imageView = src_view;
     d_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet write;
-    std::memset(&write, 0, sizeof(write));
+    VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = desc_set;
-    write.dstBinding = 0;
     write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.pImageInfo = &d_info;
     vkUpdateDescriptorSets(ctx->device, 1, &write, 0, nullptr);
 
-    VkCommandBufferBeginInfo begin;
-    std::memset(&begin, 0, sizeof(begin));
+    // Command Buffer Begin
+    VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(ctx->cmd, &begin);
 
-    insert_barrier(ctx->cmd, src_attr.image, src_attr.layout,
-                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_ACCESS_SHADER_READ_BIT,
-                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    // Initial Barriers
+    VkImageMemoryBarrier2 init_barriers[2] = {};
 
-    insert_barrier(ctx->cmd, ctx->scratch_img, VK_IMAGE_LAYOUT_UNDEFINED,
-                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
-                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    // Source Image Transition
+    init_barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    init_barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    init_barriers[0].srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    init_barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    init_barriers[0].dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    init_barriers[0].oldLayout = src_attr.layout;
+    init_barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    init_barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    init_barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    init_barriers[0].image = src_attr.image;
+    init_barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    VkClearValue clear;
-    std::memset(&clear, 0, sizeof(clear));
+    // Scratch Image Transition
+    init_barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    init_barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    init_barriers[1].dstStageMask =
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    init_barriers[1].dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    init_barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    init_barriers[1].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    init_barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    init_barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    init_barriers[1].image = ctx->scratch_img;
+    init_barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkDependencyInfo init_dep{};
+    init_dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    init_dep.imageMemoryBarrierCount = 2;
+    init_dep.pImageMemoryBarriers = init_barriers;
+    ctx->vkCmdPipelineBarrier2(ctx->cmd, &init_dep);
+
+    // Render Pass
+    VkClearValue clear{};
     clear.color.float32[3] = 1.0f;
 
-    VkRenderPassBeginInfo rp_bi;
-    std::memset(&rp_bi, 0, sizeof(rp_bi));
+    VkRenderPassBeginInfo rp_bi{};
     rp_bi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_bi.renderPass = render_pass;
     rp_bi.framebuffer = ctx->framebuffer;
-    rp_bi.renderArea.extent = ctx->extent;
+    rp_bi.renderArea = {{0, 0}, ctx->extent};
     rp_bi.clearValueCount = 1;
     rp_bi.pClearValues = &clear;
 
     vkCmdBeginRenderPass(ctx->cmd, &rp_bi, VK_SUBPASS_CONTENTS_INLINE);
+
     VkViewport vp = {0, 0, (float)ext.width, (float)ext.height, 0, 1};
     vkCmdSetViewport(ctx->cmd, 0, 1, &vp);
     VkRect2D sci = {{0, 0}, ext};
@@ -228,14 +231,13 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
     vkCmdBindDescriptorSets(ctx->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipeline_layout, 0, 1, &desc_set, 0, nullptr);
 
-    CRTPushConstants pcs;
+    CRTPushConstants pcs{};
     pcs.res[0] = (float)ext.width;
     pcs.res[1] = (float)ext.height;
     pcs.time = std::chrono::duration<float>(std::chrono::steady_clock::now() -
                                             start_time)
                    .count();
     pcs.progress = (float)progression;
-
     pcs.mask_type = (int32_t)opt_mask_type;
     pcs.beam_sigma = (float)opt_beam_sigma;
     pcs.border_size = (float)opt_border_size;
@@ -250,48 +252,72 @@ class wayfire_crt_vulkan : public wf::per_output_plugin_instance_t {
     vkCmdDraw(ctx->cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(ctx->cmd);
 
-    insert_barrier(
-        ctx->cmd, ctx->scratch_img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT);
+    // Post-Render Barriers
+    VkImageMemoryBarrier2 post_barriers[2] = {};
 
-    insert_barrier(ctx->cmd, dst_attr.image, dst_attr.layout,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                   VK_ACCESS_TRANSFER_WRITE_BIT,
-                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                   VK_PIPELINE_STAGE_TRANSFER_BIT);
+    // Scratch -> Transfer Src
+    post_barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    post_barriers[0].srcStageMask =
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    post_barriers[0].srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    post_barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    post_barriers[0].dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    post_barriers[0].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    post_barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    post_barriers[0].image = ctx->scratch_img;
+    post_barriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 
-    VkImageBlit blit;
-    std::memset(&blit, 0, sizeof(blit));
-    blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.srcSubresource.layerCount = 1;
-    blit.srcOffsets[1].x = (int32_t)ext.width;
-    blit.srcOffsets[1].y = (int32_t)ext.height;
-    blit.srcOffsets[1].z = 1;
-    blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blit.dstSubresource.layerCount = 1;
-    blit.dstOffsets[1].x = (int32_t)ext.width;
-    blit.dstOffsets[1].y = (int32_t)ext.height;
-    blit.dstOffsets[1].z = 1;
+    // Destination -> Transfer Dst
+    post_barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    post_barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    post_barriers[1].srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    post_barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    post_barriers[1].dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    post_barriers[1].oldLayout = dst_attr.layout;
+    post_barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    post_barriers[1].image = dst_attr.image;
+    post_barriers[1].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkDependencyInfo post_dep{};
+    post_dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    post_dep.imageMemoryBarrierCount = 2;
+    post_dep.pImageMemoryBarriers = post_barriers;
+    ctx->vkCmdPipelineBarrier2(ctx->cmd, &post_dep);
+
+    // Blit
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.srcOffsets[1] = {(int32_t)ext.width, (int32_t)ext.height, 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    blit.dstOffsets[1] = {(int32_t)ext.width, (int32_t)ext.height, 1};
 
     vkCmdBlitImage(ctx->cmd, ctx->scratch_img,
                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_attr.image,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                    VK_FILTER_LINEAR);
 
-    insert_barrier(
-        ctx->cmd, dst_attr.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        dst_attr.layout, VK_ACCESS_TRANSFER_WRITE_BIT,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    // Final Barrier (Restore wlroots layout)
+    VkImageMemoryBarrier2 final_barrier{};
+    final_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    final_barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    final_barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    final_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    final_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    final_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    final_barrier.newLayout = dst_attr.layout;
+    final_barrier.image = dst_attr.image;
+    final_barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+
+    VkDependencyInfo final_dep{};
+    final_dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    final_dep.imageMemoryBarrierCount = 1;
+    final_dep.pImageMemoryBarriers = &final_barrier;
+    ctx->vkCmdPipelineBarrier2(ctx->cmd, &final_dep);
 
     vkEndCommandBuffer(ctx->cmd);
 
-    VkSubmitInfo submit;
-    std::memset(&submit, 0, sizeof(submit));
+    // Submit
+    VkSubmitInfo submit{};
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &ctx->cmd;
@@ -323,6 +349,11 @@ public:
       return;
     }
 
+    // Load Sync2 Extension
+    ctx->vkCmdPipelineBarrier2 =
+        (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(
+            ctx->device, "vkCmdPipelineBarrier2KHR");
+
     vkGetDeviceQueue(ctx->device, wlr_vk_renderer_get_queue_family(renderer), 0,
                      &ctx->queue);
 
@@ -335,7 +366,6 @@ public:
     progression =
         wf::animation::simple_animation_t(wf::create_option<int>(opt_duration));
     start_time = std::chrono::steady_clock::now();
-    last_swap_time = start_time;
 
     if (opt_enabled) {
       active = true;
@@ -371,33 +401,25 @@ private:
 
   wf::activator_callback on_cycle = [this](auto) {
     auto now = std::chrono::steady_clock::now();
-    if (now - last_swap_time < std::chrono::seconds(1))
+    if (now - last_swap_time < std::chrono::seconds(1) || shader_list.empty())
       return true;
-    if (shader_list.empty())
-      return true;
-
     bool was_active = active;
     if (active) {
       output->render->rem_post(&render_hook);
       active = false;
     }
-
     current_idx = (current_idx + 1) % shader_list.size();
     vkDeviceWaitIdle(ctx->device);
-
     if (pipeline)
       vkDestroyPipeline(ctx->device, pipeline, nullptr);
     if (frag_module)
       vkDestroyShaderModule(ctx->device, frag_module, nullptr);
-
     frag_module = load_spv(shader_list[current_idx]);
     setup_pipeline();
-
     if (was_active && pipeline != VK_NULL_HANDLE) {
       output->render->add_post(&render_hook);
       active = true;
     }
-
     last_swap_time = std::chrono::steady_clock::now();
     output->render->damage_whole();
     return true;
@@ -410,9 +432,8 @@ private:
     for (const auto &entry : fs::directory_iterator(base_path)) {
       std::string p = entry.path().string();
       if (ends_with(p, ".spv") &&
-          p.find("fullscreen.vert.spv") == std::string::npos) {
+          p.find("fullscreen.vert.spv") == std::string::npos)
         shader_list.push_back(p);
-      }
     }
     std::sort(shader_list.begin(), shader_list.end());
     for (size_t i = 0; i < shader_list.size(); ++i) {
@@ -434,26 +455,30 @@ private:
       vkFreeMemory(ctx->device, ctx->scratch_mem, nullptr);
 
     ctx->extent = ext;
-    VkImageCreateInfo i_ci;
-    std::memset(&i_ci, 0, sizeof(i_ci));
+
+    // Zero-initialize the entire struct first
+    VkImageCreateInfo i_ci{};
     i_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     i_ci.imageType = VK_IMAGE_TYPE_2D;
     i_ci.format = VK_FORMAT_B8G8R8A8_UNORM;
-    i_ci.extent.width = ext.width;
-    i_ci.extent.height = ext.height;
-    i_ci.extent.depth = 1;
+    i_ci.extent = {ext.width, ext.height, 1};
     i_ci.mipLevels = 1;
     i_ci.arrayLayers = 1;
     i_ci.samples = VK_SAMPLE_COUNT_1_BIT;
     i_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     i_ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    i_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    i_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
     vkCreateImage(ctx->device, &i_ci, nullptr, &ctx->scratch_img);
 
     VkMemoryRequirements mem_req;
     vkGetImageMemoryRequirements(ctx->device, ctx->scratch_img, &mem_req);
+
     VkPhysicalDeviceMemoryProperties mem_p;
     vkGetPhysicalDeviceMemoryProperties(ctx->phdev, &mem_p);
+
     uint32_t mt = 0;
     for (uint32_t i = 0; i < mem_p.memoryTypeCount; i++) {
       if ((mem_req.memoryTypeBits & (1 << i)) &&
@@ -464,27 +489,22 @@ private:
       }
     }
 
-    VkMemoryAllocateInfo alloc;
-    std::memset(&alloc, 0, sizeof(alloc));
+    VkMemoryAllocateInfo alloc{};
     alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     alloc.allocationSize = mem_req.size;
     alloc.memoryTypeIndex = mt;
     vkAllocateMemory(ctx->device, &alloc, nullptr, &ctx->scratch_mem);
     vkBindImageMemory(ctx->device, ctx->scratch_img, ctx->scratch_mem, 0);
 
-    VkImageViewCreateInfo v_ci;
-    std::memset(&v_ci, 0, sizeof(v_ci));
+    VkImageViewCreateInfo v_ci{};
     v_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     v_ci.image = ctx->scratch_img;
     v_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     v_ci.format = VK_FORMAT_B8G8R8A8_UNORM;
-    v_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    v_ci.subresourceRange.levelCount = 1;
-    v_ci.subresourceRange.layerCount = 1;
+    v_ci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     vkCreateImageView(ctx->device, &v_ci, nullptr, &ctx->scratch_view);
 
-    VkFramebufferCreateInfo fb_ci;
-    std::memset(&fb_ci, 0, sizeof(fb_ci));
+    VkFramebufferCreateInfo fb_ci{};
     fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fb_ci.renderPass = render_pass;
     fb_ci.attachmentCount = 1;
@@ -496,46 +516,43 @@ private:
   }
 
   bool initialize_resources() {
-    VkCommandPoolCreateInfo cp_ci;
-    std::memset(&cp_ci, 0, sizeof(cp_ci));
+    VkCommandPoolCreateInfo cp_ci{};
     cp_ci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cp_ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cp_ci.queueFamilyIndex =
         wlr_vk_renderer_get_queue_family(wf::get_core().renderer);
     vkCreateCommandPool(ctx->device, &cp_ci, nullptr, &ctx->pool);
 
-    VkCommandBufferAllocateInfo a_ci;
-    std::memset(&a_ci, 0, sizeof(a_ci));
+    VkCommandBufferAllocateInfo a_ci{};
     a_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     a_ci.commandPool = ctx->pool;
     a_ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     a_ci.commandBufferCount = 1;
     vkAllocateCommandBuffers(ctx->device, &a_ci, &ctx->cmd);
 
-    VkFenceCreateInfo f_ci;
-    std::memset(&f_ci, 0, sizeof(f_ci));
+    VkFenceCreateInfo f_ci{};
     f_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     f_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     vkCreateFence(ctx->device, &f_ci, nullptr, &ctx->fence);
 
-    VkAttachmentDescription att;
-    std::memset(&att, 0, sizeof(att));
+    VkAttachmentDescription att{};
     att.format = VK_FORMAT_B8G8R8A8_UNORM;
     att.samples = VK_SAMPLE_COUNT_1_BIT;
     att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     att.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    VkSubpassDescription sd;
-    std::memset(&sd, 0, sizeof(sd));
+
+    VkSubpassDescription sd{};
     sd.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sd.colorAttachmentCount = 1;
     sd.pColorAttachments = &ref;
 
-    VkRenderPassCreateInfo rp_ci;
-    std::memset(&rp_ci, 0, sizeof(rp_ci));
+    VkRenderPassCreateInfo rp_ci{};
     rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rp_ci.attachmentCount = 1;
     rp_ci.pAttachments = &att;
@@ -549,6 +566,7 @@ private:
 
     if (!shader_list.empty())
       frag_module = load_spv(shader_list[current_idx]);
+
     if (frag_module == VK_NULL_HANDLE)
       return false;
 
@@ -561,23 +579,24 @@ private:
     std::ifstream file(path, std::ios::ate | std::ios::binary);
     if (!file.is_open())
       return VK_NULL_HANDLE;
+
     size_t size = (size_t)file.tellg();
     std::vector<char> buffer(size);
     file.seekg(0);
     file.read(buffer.data(), size);
-    VkShaderModuleCreateInfo ci;
-    std::memset(&ci, 0, sizeof(ci));
+
+    VkShaderModuleCreateInfo ci{}; // Zero-initialize
     ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ci.codeSize = buffer.size();
     ci.pCode = reinterpret_cast<const uint32_t *>(buffer.data());
+
     VkShaderModule mod;
     vkCreateShaderModule(ctx->device, &ci, nullptr, &mod);
     return mod;
   }
 
   void setup_descriptors() {
-    VkSamplerCreateInfo s_ci;
-    std::memset(&s_ci, 0, sizeof(s_ci));
+    VkSamplerCreateInfo s_ci{}; // Zero-initialize
     s_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     s_ci.magFilter = VK_FILTER_LINEAR;
     s_ci.minFilter = VK_FILTER_LINEAR;
@@ -587,40 +606,37 @@ private:
     s_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     vkCreateSampler(ctx->device, &s_ci, nullptr, &sampler);
 
-    VkDescriptorSetLayoutBinding bindings[2];
-    std::memset(bindings, 0, sizeof(bindings));
+    VkDescriptorSetLayoutBinding bindings[2] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutCreateInfo dl_ci;
-    std::memset(&dl_ci, 0, sizeof(dl_ci));
+    VkDescriptorSetLayoutCreateInfo dl_ci{};
     dl_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     dl_ci.bindingCount = 2;
     dl_ci.pBindings = bindings;
     vkCreateDescriptorSetLayout(ctx->device, &dl_ci, nullptr, &desc_layout);
 
-    VkDescriptorPoolSize ps[2];
+    VkDescriptorPoolSize ps[2] = {};
     ps[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     ps[0].descriptorCount = 1;
     ps[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     ps[1].descriptorCount = 1;
 
-    VkDescriptorPoolCreateInfo dp_ci;
-    std::memset(&dp_ci, 0, sizeof(dp_ci));
+    VkDescriptorPoolCreateInfo dp_ci{};
     dp_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     dp_ci.maxSets = 1;
     dp_ci.poolSizeCount = 2;
     dp_ci.pPoolSizes = ps;
     vkCreateDescriptorPool(ctx->device, &dp_ci, nullptr, &desc_pool);
 
-    VkDescriptorSetAllocateInfo ds_ai;
-    std::memset(&ds_ai, 0, sizeof(ds_ai));
+    VkDescriptorSetAllocateInfo ds_ai{};
     ds_ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     ds_ai.descriptorPool = desc_pool;
     ds_ai.descriptorSetCount = 1;
@@ -633,14 +649,13 @@ private:
         ctx->device == VK_NULL_HANDLE)
       return;
 
-    VkPushConstantRange pcr;
+    VkPushConstantRange pcr{};
     pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pcr.offset = 0;
     pcr.size = sizeof(CRTPushConstants);
 
     if (pipeline_layout == VK_NULL_HANDLE) {
-      VkPipelineLayoutCreateInfo pl_ci;
-      std::memset(&pl_ci, 0, sizeof(pl_ci));
+      VkPipelineLayoutCreateInfo pl_ci{};
       pl_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
       pl_ci.setLayoutCount = 1;
       pl_ci.pSetLayouts = &desc_layout;
@@ -649,55 +664,54 @@ private:
       vkCreatePipelineLayout(ctx->device, &pl_ci, nullptr, &pipeline_layout);
     }
 
-    VkPipelineShaderStageCreateInfo stages[2];
-    std::memset(stages, 0, sizeof(stages));
+    VkPipelineShaderStageCreateInfo stages[2] = {};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
     stages[0].module = vert_module;
     stages[0].pName = "main";
+
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = frag_module;
     stages[1].pName = "main";
 
-    VkPipelineVertexInputStateCreateInfo vi;
-    std::memset(&vi, 0, sizeof(vi));
+    VkPipelineVertexInputStateCreateInfo vi{};
     vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia;
-    std::memset(&ia, 0, sizeof(ia));
+
+    VkPipelineInputAssemblyStateCreateInfo ia{};
     ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vps;
-    std::memset(&vps, 0, sizeof(vps));
+
+    VkPipelineViewportStateCreateInfo vps{};
     vps.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     vps.viewportCount = 1;
     vps.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs;
-    std::memset(&rs, 0, sizeof(rs));
+
+    VkPipelineRasterizationStateCreateInfo rs{};
     rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms;
-    std::memset(&ms, 0, sizeof(ms));
+
+    VkPipelineMultisampleStateCreateInfo ms{};
     ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState cba;
-    std::memset(&cba, 0, sizeof(cba));
-    cba.colorWriteMask = 0xf;
-    VkPipelineColorBlendStateCreateInfo cb;
-    std::memset(&cb, 0, sizeof(cb));
+
+    VkPipelineColorBlendAttachmentState cba{};
+    cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo cb{};
     cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     cb.attachmentCount = 1;
     cb.pAttachments = &cba;
+
     VkDynamicState dyn_s[] = {VK_DYNAMIC_STATE_VIEWPORT,
                               VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dyn;
-    std::memset(&dyn, 0, sizeof(dyn));
+    VkPipelineDynamicStateCreateInfo dyn{};
     dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dyn.dynamicStateCount = 2;
     dyn.pDynamicStates = dyn_s;
 
-    VkGraphicsPipelineCreateInfo gp_ci;
-    std::memset(&gp_ci, 0, sizeof(gp_ci));
+    VkGraphicsPipelineCreateInfo gp_ci{};
     gp_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     gp_ci.stageCount = 2;
     gp_ci.pStages = stages;
