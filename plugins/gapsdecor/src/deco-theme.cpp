@@ -1,67 +1,97 @@
 #include "deco-theme.hpp"
+#include <config.h>
 #include <wayfire/core.hpp>
 #include <wayfire/opengl.hpp>
-#include <wayfire/render-manager.hpp>
+#include <wayfire/plugins/common/cairo-util.hpp>
 
 namespace wf {
 namespace decor {
-/** Create a new theme with the default parameters */
-gapsdecor_theme_t::gapsdecor_theme_t() {}
 
-/** @return The available height for displaying the title */
-int gapsdecor_theme_t::get_title_height() const { return title_height; }
+decoration_theme_t::decoration_theme_t() {}
 
-/** @return The available border for resizing */
-int gapsdecor_theme_t::get_border_size() const { return border_size; }
-
-/** @return The available border for resizing */
-void gapsdecor_theme_t::set_buttons(button_type_t flags) {
+int decoration_theme_t::get_title_height() const { return title_height; }
+int decoration_theme_t::get_border_size() const { return border_size; }
+void decoration_theme_t::set_buttons(button_type_t flags) {
   button_flags = flags;
 }
 
-/**
- * Fill the given rectangle with the background color(s).
- *
- * @param fb The target framebuffer, must have been bound already
- * @param rectangle The rectangle to redraw.
- * @param scissor The GL scissor rectangle to use.
- * @param active Whether to use active or inactive colors
- */
-void gapsdecor_theme_t::render_background(const wf::render_target_t &fb,
-                                          wf::geometry_t rectangle,
-                                          const wf::geometry_t &scissor,
-                                          bool active) const {}
+static void draw_rounded_rectangle(cairo_t *cr, int x, int y, int w, int h,
+                                   double radius) {
+  if (radius <= 0) {
+    cairo_rectangle(cr, x, y, w, h);
+    return;
+  }
+  cairo_new_sub_path(cr);
+  cairo_arc(cr, x + w - radius, y + radius, radius, -M_PI / 2, 0);
+  cairo_arc(cr, x + w - radius, y + h - radius, radius, 0, M_PI / 2);
+  cairo_arc(cr, x + radius, y + h - radius, radius, M_PI / 2, M_PI);
+  cairo_arc(cr, x + radius, y + radius, radius, M_PI, 270 * M_PI / 180);
+  cairo_close_path(cr);
+}
 
-/**
- * Render the given text on a cairo_surface_t with the given size.
- * The caller is responsible for freeing the memory afterwards.
- */
-cairo_surface_t *gapsdecor_theme_t::render_text(std::string text, int width,
-                                                int height) const {
-  const auto format = CAIRO_FORMAT_ARGB32;
-  auto surface = cairo_image_surface_create(format, width, height);
+void decoration_theme_t::render_background(
+    const wf::scene::render_instruction_t &data, wf::geometry_t rectangle,
+    bool active) const {
+  int radius = corner_radius;
+  wf::color_t color = active ? active_color : inactive_color;
 
-  if (height == 0) {
-    return surface;
+  if (radius <= 0) {
+    data.pass->add_rect(color, data.target, rectangle, data.damage);
+    return;
   }
 
+  auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                            rectangle.width, rectangle.height);
   auto cr = cairo_create(surface);
 
-  const float font_scale = 0.8;
-  const float font_size = height * font_scale;
+  cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+  cairo_set_source_rgba(cr, 0, 0, 0, 0);
+  cairo_paint(cr);
 
-  PangoFontDescription *font_desc;
-  PangoLayout *layout;
+  cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
+  draw_rounded_rectangle(cr, 0, 0, rectangle.width, rectangle.height, radius);
+  cairo_fill(cr);
 
-  // render text
-  font_desc = pango_font_description_from_string(((std::string)font).c_str());
+  unsigned char *pixels = cairo_image_surface_get_data(surface);
+  int stride = cairo_image_surface_get_stride(surface);
+  uint32_t fmt = DRM_FORMAT_ARGB8888;
+
+  auto wlr_tex =
+      wlr_texture_from_pixels(wf::get_core().renderer, fmt, stride,
+                              rectangle.width, rectangle.height, pixels);
+
+  if (wlr_tex) {
+    wf::owned_texture_t background_texture;
+    background_texture = wlr_tex;
+
+    data.pass->add_texture(background_texture.get_texture(), data.target,
+                           rectangle, data.damage);
+  }
+
+  cairo_destroy(cr);
+  cairo_surface_destroy(surface);
+}
+
+cairo_surface_t *decoration_theme_t::render_text(std::string text, int width,
+                                                 int height) const {
+  auto surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+  if (height == 0)
+    return surface;
+
+  wf::color_t color = font_color;
+  auto cr = cairo_create(surface);
+  const float font_size = height * 0.8;
+
+  PangoFontDescription *font_desc =
+      pango_font_description_from_string(((std::string)font).c_str());
   pango_font_description_set_absolute_size(font_desc, font_size * PANGO_SCALE);
 
-  layout = pango_cairo_create_layout(cr);
+  PangoLayout *layout = pango_cairo_create_layout(cr);
   pango_layout_set_font_description(layout, font_desc);
   pango_layout_set_text(layout, text.c_str(), text.size());
-  cairo_set_source_rgba(cr, 1, 1, 1, 1);
+  cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
   pango_cairo_show_layout(cr, layout);
+
   pango_font_description_free(font_desc);
   g_object_unref(layout);
   cairo_destroy(cr);
@@ -70,97 +100,69 @@ cairo_surface_t *gapsdecor_theme_t::render_text(std::string text, int width,
 }
 
 cairo_surface_t *
-gapsdecor_theme_t::get_button_surface(button_type_t button,
-                                      const button_state_t &state) const {
+decoration_theme_t::get_button_surface(button_type_t button,
+                                       const button_state_t &state) const {
   cairo_surface_t *button_surface = cairo_image_surface_create(
       CAIRO_FORMAT_ARGB32, state.width, state.height);
-
   auto cr = cairo_create(button_surface);
   cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
 
-  /* Clear the button background */
   cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
   cairo_set_source_rgba(cr, 0, 0, 0, 0);
   cairo_rectangle(cr, 0, 0, state.width, state.height);
   cairo_fill(cr);
 
   cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
-
-  /** A gray that looks good on light and dark themes */
   color_t base = {0.60, 0.60, 0.63, 0.36};
-
-  /**
-   * We just need the alpha component.
-   * r == g == b == 0.0 will be directly set
-   */
   double line = 0.27;
   double hover = 0.27;
 
-  /** Coloured base on hover/press. Don't compare float to 0 */
   if (fabs(state.hover_progress) > 1e-3) {
-    switch (button) {
-    case BUTTON_CLOSE:
+    if (button == BUTTON_CLOSE)
       base = {242.0 / 255.0, 80.0 / 255.0, 86.0 / 255.0, 0.63};
-      break;
-
-    case BUTTON_TOGGLE_MAXIMIZE:
+    else if (button == BUTTON_TOGGLE_MAXIMIZE)
       base = {57.0 / 255.0, 234.0 / 255.0, 73.0 / 255.0, 0.63};
-      break;
-
-    case BUTTON_MINIMIZE:
+    else if (button == BUTTON_MINIMIZE)
       base = {250.0 / 255.0, 198.0 / 255.0, 54.0 / 255.0, 0.63};
-      break;
-
-    default:
-      assert(false);
-    }
-
     line *= 2.0;
   }
 
-  // This renders great on my screen (110 dpi 1376x768 lcd screen)
-  // How this would appear on a Hi-DPI screen is questionable
-  double r = state.width / 2 - 0.5 * state.border;
-  cairo_arc(cr, state.width / 2, state.height / 2, r, 0, 2 * M_PI);
+  cairo_set_source_rgba(cr, base.r, base.g, base.b,
+                        base.a + hover * state.hover_progress);
+  cairo_arc(cr, state.width / 2, state.height / 2, state.width / 2, 0,
+            2 * M_PI);
+  cairo_fill(cr);
+
+  cairo_set_line_width(cr, state.border);
+  cairo_set_source_rgba(cr, 0.00, 0.00, 0.00, line);
+  cairo_arc(cr, state.width / 2, state.height / 2,
+            state.width / 2 - 0.5 * state.border, 0, 2 * M_PI);
   cairo_stroke(cr);
 
+  cairo_set_source_rgba(cr, 0.00, 0.00, 0.00, line / 2);
   cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
-  switch (button) {
-  case BUTTON_CLOSE:
+  if (button == BUTTON_CLOSE) {
     cairo_set_line_width(cr, 1.5 * state.border);
-    cairo_move_to(cr, 1.0 * state.width / 4.0, 1.0 * state.height / 4.0);
-    cairo_line_to(cr, 3.0 * state.width / 4.0,
-                  3.0 * state.height / 4.0); // '\' part of x
-    cairo_move_to(cr, 3.0 * state.width / 4.0, 1.0 * state.height / 4.0);
-    cairo_line_to(cr, 1.0 * state.width / 4.0,
-                  3.0 * state.height / 4.0); // '/' part of x
+    cairo_move_to(cr, state.width / 4.0, state.height / 4.0);
+    cairo_line_to(cr, 3.0 * state.width / 4.0, 3.0 * state.height / 4.0);
+    cairo_move_to(cr, 3.0 * state.width / 4.0, state.height / 4.0);
+    cairo_line_to(cr, state.width / 4.0, 3.0 * state.height / 4.0);
     cairo_stroke(cr);
-    break;
-
-  case BUTTON_TOGGLE_MAXIMIZE:
+  } else if (button == BUTTON_TOGGLE_MAXIMIZE) {
     cairo_set_line_width(cr, 1.5 * state.border);
-    cairo_rectangle(cr,                                    // Context
-                    state.width / 4.0, state.height / 4.0, // (x, y)
-                    state.width / 2.0, state.height / 2.0  // w x h
-    );
+    cairo_rectangle(cr, state.width / 4.0, state.height / 4.0,
+                    state.width / 2.0, state.height / 2.0);
     cairo_stroke(cr);
-    break;
-
-  case BUTTON_MINIMIZE:
+  } else if (button == BUTTON_MINIMIZE) {
     cairo_set_line_width(cr, 1.75 * state.border);
-    cairo_move_to(cr, 1.0 * state.width / 4.0, state.height / 2.0);
+    cairo_move_to(cr, state.width / 4.0, state.height / 2.0);
     cairo_line_to(cr, 3.0 * state.width / 4.0, state.height / 2.0);
     cairo_stroke(cr);
-    break;
-
-  default:
-    assert(false);
   }
 
-  cairo_fill(cr);
   cairo_destroy(cr);
-
   return button_surface;
 }
+
 } // namespace decor
 } // namespace wf
